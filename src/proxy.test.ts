@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
+import { createSessionToken } from "@/server/auth";
 import { proxy } from "@/proxy";
 
 const originalUsername = process.env.AETERNA_AUTH_USERNAME;
@@ -27,31 +28,21 @@ describe("AETERNA auth proxy", () => {
     expect(pageResponse.status).toBe(307);
     expect(pageResponse.headers.get("location")).toContain("/login?next=%2Forders");
     expect(apiResponse.status).toBe(401);
+    expect(apiResponse.headers.get("www-authenticate")).toBeNull();
+    expect(await apiResponse.json()).toEqual({ error: "Autenticazione richiesta." });
   });
 
-  it("exchanges legacy Basic Auth for a persistent signed session", async () => {
+  it("accepts a persistent signed session without Basic Auth", async () => {
     process.env.AETERNA_AUTH_USERNAME = "test-user";
     process.env.AETERNA_AUTH_PASSWORD = "test-password";
     process.env.AETERNA_SESSION_SECRET = "test-session-secret";
-    const basic = btoa("test-user:test-password");
-
-    const bootstrapResponse = await proxy(
-      new NextRequest("http://localhost/orders", {
-        headers: { authorization: `Basic ${basic}` },
-      }),
-    );
-    const setCookie = bootstrapResponse.headers.get("set-cookie") ?? "";
-    const sessionCookie = setCookie.split(";")[0];
+    const token = await createSessionToken();
     const sessionResponse = await proxy(
       new NextRequest("http://localhost/orders", {
-        headers: { cookie: sessionCookie },
+        headers: { cookie: `aeterna_session=${token}` },
       }),
     );
 
-    expect(bootstrapResponse.status).toBe(200);
-    expect(setCookie).toContain("aeterna_session=");
-    expect(setCookie).toContain("HttpOnly");
-    expect(setCookie).toContain("SameSite=lax");
     expect(sessionResponse.status).toBe(200);
   });
 });
