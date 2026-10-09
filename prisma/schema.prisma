@@ -1,0 +1,435 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Source {
+  SHOPIFY
+  MANUAL
+  OTHER
+}
+
+enum RecordStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FULFILLED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+  FAILED
+}
+
+enum FulfillmentStatus {
+  UNFULFILLED
+  PARTIALLY_FULFILLED
+  FULFILLED
+  RETURNED
+}
+
+enum TaskStatus {
+  LOCKED
+  TODO
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+}
+
+enum TaskCategory {
+  DATA
+  MARKETING
+  CONTENT
+  WEBSITE
+  OPERATIONS
+  OTHER
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  PAUSED
+  ARCHIVED
+}
+
+enum PhaseStatus {
+  LOCKED
+  CURRENT
+  COMPLETED
+}
+
+enum ExperimentStatus {
+  PLANNED
+  RUNNING
+  COMPLETED
+  CANCELLED
+}
+
+enum ContentPlatform {
+  INSTAGRAM
+  TIKTOK
+  OTHER
+}
+
+enum ContentFormat {
+  POST
+  REEL
+  STORY
+  VIDEO
+  CAROUSEL
+  OTHER
+}
+
+enum ContentStatus {
+  IDEA
+  PLANNED
+  READY
+  PUBLISHED
+  ARCHIVED
+}
+
+enum CreatorStatus {
+  PROSPECT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum IntegrationType {
+  SHOPIFY
+  META_ADS
+  ANALYTICS
+  OPENAI_ASTRA
+  OTHER
+}
+
+enum IntegrationStatus {
+  NOT_CONFIGURED
+  CONNECTED
+  SYNCING
+  ERROR
+  DISCONNECTED
+}
+
+enum SyncEventStatus {
+  RECEIVED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum AuditAction {
+  TASK_CREATED
+  TASK_COMPLETED
+  GOAL_UPDATED
+  REPORT_GENERATED
+  SYNC_STARTED
+  SYNC_COMPLETED
+  SYNC_FAILED
+  OTHER
+}
+
+model Order {
+  id                String            @id @default(cuid())
+  externalId        String?           @unique
+  orderNumber       String?
+  source            Source            @default(OTHER)
+  orderDate         DateTime?
+  status            OrderStatus       @default(PENDING)
+  totalAmount       Decimal?          @db.Decimal(12, 2)
+  currency          String            @default("EUR") @db.VarChar(3)
+  paymentStatus     PaymentStatus     @default(PENDING)
+  fulfillmentStatus FulfillmentStatus @default(UNFULFILLED)
+  refundedAmount    Decimal?          @db.Decimal(12, 2)
+  refundedAt        DateTime?
+  customerId        String?
+  customer          Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items             OrderItem[]
+  syncEvents        SyncEvent[]
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([orderDate])
+  @@index([source, status])
+  @@index([customerId])
+}
+
+model OrderItem {
+  id        String   @id @default(cuid())
+  orderId   String
+  productId String?
+  name      String
+  sku       String?
+  quantity  Int
+  unitPrice Decimal? @db.Decimal(12, 2)
+  lineTotal Decimal? @db.Decimal(12, 2)
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model Product {
+  id          String         @id @default(cuid())
+  externalId  String?        @unique
+  source      Source         @default(OTHER)
+  name        String
+  sku         String?        @unique
+  description String?
+  price       Decimal?       @db.Decimal(12, 2)
+  currency    String         @default("EUR") @db.VarChar(3)
+  status      RecordStatus   @default(ACTIVE)
+  category    String?
+  imageUrl    String?
+  inventory   InventoryItem?
+  orderItems  OrderItem[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([source, status])
+  @@index([category])
+}
+
+model InventoryItem {
+  id            String   @id @default(cuid())
+  productId     String   @unique
+  availableQty  Int      @default(0)
+  reservedQty   Int?
+  minimumQty    Int      @default(0)
+  source        Source   @default(OTHER)
+  lastUpdatedAt DateTime @updatedAt
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@index([source])
+}
+
+model Customer {
+  id          String    @id @default(cuid())
+  externalId  String?   @unique
+  source      Source    @default(OTHER)
+  name        String?
+  email       String?   @unique
+  phone       String?
+  orderCount  Int       @default(0) // Cached aggregate maintained by the order service.
+  lastOrderAt DateTime? // Cached aggregate maintained by the order service.
+  orders      Order[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([source])
+}
+
+model Goal {
+  id           String      @id @default(cuid())
+  key          String?     @unique
+  name         String
+  currentValue Decimal     @default(0) @db.Decimal(12, 2)
+  targetValue  Decimal     @db.Decimal(12, 2)
+  unit         String
+  startDate    DateTime
+  targetDate   DateTime?
+  status       GoalStatus  @default(ACTIVE)
+  phases       GoalPhase[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([status])
+}
+
+model GoalPhase {
+  id                 String      @id @default(cuid())
+  goalId             String
+  targetValue        Decimal     @db.Decimal(12, 2)
+  position           Int
+  status             PhaseStatus @default(LOCKED)
+  completionCriteria Json
+  previousPhaseId    String?
+  goal               Goal        @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  previousPhase      GoalPhase?  @relation("PhaseChain", fields: [previousPhaseId], references: [id], onDelete: SetNull)
+  nextPhases         GoalPhase[] @relation("PhaseChain")
+  tasks              Task[]
+
+  @@unique([goalId, position])
+  @@index([goalId, status])
+}
+
+model Task {
+  id                 String           @id @default(cuid())
+  title              String
+  description        String?
+  completionCriteria String?
+  status             TaskStatus       @default(TODO)
+  priority           Int              @default(0)
+  category           TaskCategory     @default(OTHER)
+  goalPhaseId        String?
+  position           Int              @default(0)
+  dueDate            DateTime?
+  completedAt        DateTime?
+  goalPhase          GoalPhase?       @relation(fields: [goalPhaseId], references: [id], onDelete: SetNull)
+  prerequisiteLinks  TaskDependency[] @relation("TaskDependent")
+  dependentLinks     TaskDependency[] @relation("TaskPrerequisite")
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([status, priority])
+  @@index([goalPhaseId, position])
+}
+
+model TaskDependency {
+  prerequisiteId String
+  dependentId    String
+  prerequisite   Task   @relation("TaskPrerequisite", fields: [prerequisiteId], references: [id], onDelete: Cascade)
+  dependent      Task   @relation("TaskDependent", fields: [dependentId], references: [id], onDelete: Cascade)
+
+  @@id([prerequisiteId, dependentId])
+  @@index([dependentId])
+}
+
+model Experiment {
+  id          String           @id @default(cuid())
+  name        String
+  hypothesis  String?
+  description String?
+  status      ExperimentStatus @default(PLANNED)
+  startedAt   DateTime?
+  endedAt     DateTime?
+  result      String?
+  conclusion  String?
+  metrics     Json?
+  notes       String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([status])
+}
+
+model Content {
+  id          String           @id @default(cuid())
+  title       String
+  platform    ContentPlatform  @default(OTHER)
+  format      ContentFormat    @default(OTHER)
+  status      ContentStatus    @default(IDEA)
+  publishedAt DateTime?
+  caption     String?
+  hook        String?
+  cta         String?
+  assetUrl    String?
+  result      Json?
+  notes       String?
+  creators    ContentCreator[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([platform, status])
+  @@index([publishedAt])
+}
+
+model Creator {
+  id          String           @id @default(cuid())
+  name        String
+  username    String?
+  platform    ContentPlatform  @default(OTHER)
+  contact     String?
+  status      CreatorStatus    @default(PROSPECT)
+  notes       String?
+  performance Json?
+  contents    ContentCreator[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([platform, status])
+}
+
+model ContentCreator {
+  contentId String
+  creatorId String
+  content   Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  creator   Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@id([contentId, creatorId])
+}
+
+model AstraReport {
+  id               String   @id @default(cuid())
+  reportDate       DateTime @unique
+  generalSituation String
+  orders           Json
+  trend            String
+  whatWorks        Json
+  whatDoesNotWork  Json
+  problems         Json
+  opportunities    Json
+  recommendedTasks Json
+  priorityOne      String
+  progressToFive   Decimal? @db.Decimal(5, 2)
+  dataSnapshot     Json
+  createdAt        DateTime @default(now())
+
+  // Reports are append-only in the domain layer; revisions can be added later explicitly.
+  @@index([createdAt])
+}
+
+model Integration {
+  id           String            @id @default(cuid())
+  type         IntegrationType
+  name         String
+  status       IntegrationStatus @default(NOT_CONFIGURED)
+  lastSyncedAt DateTime?
+  lastError    String?
+  config       Json?
+  syncEvents   SyncEvent[]
+  auditLogs    AuditLog[]
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@unique([type, name])
+  @@index([status])
+}
+
+model SyncEvent {
+  id            String          @id @default(cuid())
+  integrationId String
+  eventType     String
+  externalId    String?
+  status        SyncEventStatus @default(RECEIVED)
+  occurredAt    DateTime        @default(now())
+  error         String?
+  metadata      Json?
+  orderId       String?
+  integration   Integration     @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  order         Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([integrationId, status])
+  @@index([externalId])
+  @@index([occurredAt])
+}
+
+model AuditLog {
+  id            String       @id @default(cuid())
+  action        AuditAction
+  entityType    String
+  entityId      String?
+  actorId       String?
+  integrationId String?
+  metadata      Json?
+  createdAt     DateTime     @default(now())
+  integration   Integration? @relation(fields: [integrationId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}

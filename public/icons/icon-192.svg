@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="AETERNA OS">
+  <rect width="192" height="192" rx="32" fill="#171716"/>
+  <rect x="26" y="26" width="140" height="140" rx="12" fill="none" stroke="#c19b60" stroke-width="4"/>
+  <path d="M96 46 57 143h22l8-22h40l8 22h22L118 46H96Zm2 25 15 32H83l15-32Z" fill="#f7f7f5"/>
+</svg>
