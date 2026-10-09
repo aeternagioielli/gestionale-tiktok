@@ -785,9 +785,9 @@ button {
     width: 100%;
     margin-left: 0;
   }
-  .topbar {
+ .topbar {
     min-height: 75px;
-    padding: 15px 22px;
+    padding: calc(15px + env(safe-area-inset-top, 0px)) 22px 15px;
   }
   .connection-status {
     padding: 6px 22px;
