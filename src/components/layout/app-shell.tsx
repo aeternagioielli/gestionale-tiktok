@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   ArrowUpRight,
   Bot,
   CheckSquare,
   Compass,
+  LogOut,
   Menu,
   ShoppingBag,
   Settings2,
@@ -20,6 +21,13 @@ import { LinkButton } from "@/components/ui/button";
 
 function Sidebar({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+    router.push("/login");
+  }
+
   return (
     <aside className="sidebar">
       <div className="brand-row">
@@ -62,6 +70,9 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
       <div className="sidebar-footer">
         <StatusBadge tone="muted">Ambiente locale</StatusBadge>
         <p>Nessun dato demo viene inserito automaticamente.</p>
+        <button className="sidebar-logout" type="button" onClick={handleLogout}>
+          <LogOut size={13} /> Esci dalla sessione
+        </button>
       </div>
     </aside>
   );
@@ -151,11 +162,19 @@ function MobileNav() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const pathname = usePathname();
   useEffect(() => {
     const handler = () => setMenuOpen(true);
     window.addEventListener("aeterna:open-menu", handler);
     return () => window.removeEventListener("aeterna:open-menu", handler);
   }, []);
+  if (pathname === "/login") {
+    return (
+      <div className="auth-shell">
+        <main>{children}</main>
+      </div>
+    );
+  }
   return (
     <div className="app-shell">
       <div className={menuOpen ? "sidebar-mobile open" : "sidebar-mobile"}>

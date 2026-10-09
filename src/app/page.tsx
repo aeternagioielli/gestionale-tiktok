@@ -17,6 +17,7 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { LinkButton } from "@/components/ui/button";
 import { PriorityTask } from "@/components/dashboard/priority-task";
+import { RetryButton } from "@/components/ui/retry-button";
 import {
   emptyOverviewData,
   getOverviewData,
@@ -137,7 +138,8 @@ export default async function OverviewPage() {
       </section>
       {data.error && (
         <div className="system-alert" role="alert">
-          {data.error}
+          <span>{data.error}</span>
+          <RetryButton />
         </div>
       )}
 
