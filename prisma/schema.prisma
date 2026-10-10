@@ -384,6 +384,23 @@ model AstraReport {
   @@index([createdAt])
 }
 
+model AiInvocation {
+  id           String   @id @default(cuid())
+  taskType     String   @db.VarChar(64)
+  model        String   @db.VarChar(128)
+  status       String   @db.VarChar(16)
+  durationMs   Int
+  inputTokens  Int?
+  outputTokens Int?
+  totalTokens  Int?
+  errorCode    String?  @db.VarChar(64)
+  createdAt    DateTime @default(now())
+
+  // Prompts, responses, credentials and user identifiers are intentionally not retained.
+  @@index([createdAt])
+  @@index([taskType, status])
+}
+
 model Integration {
   id           String            @id @default(cuid())
   type         IntegrationType

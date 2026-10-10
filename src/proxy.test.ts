@@ -24,10 +24,14 @@ describe("AETERNA auth proxy", () => {
 
     const pageResponse = await proxy(new NextRequest("http://localhost/orders"));
     const apiResponse = await proxy(new NextRequest("http://localhost/api/overview"));
+    const openAiTestResponse = await proxy(
+      new NextRequest("http://localhost/api/integrations/openai/test"),
+    );
 
     expect(pageResponse.status).toBe(307);
     expect(pageResponse.headers.get("location")).toContain("/login?next=%2Forders");
     expect(apiResponse.status).toBe(401);
+    expect(openAiTestResponse.status).toBe(401);
     expect(apiResponse.headers.get("www-authenticate")).toBeNull();
     expect(await apiResponse.json()).toEqual({ error: "Autenticazione richiesta." });
   });
