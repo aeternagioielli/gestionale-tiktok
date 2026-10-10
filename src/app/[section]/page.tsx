@@ -1,23 +1,24 @@
-import { ArrowUpRight, Bot, Settings2, Sparkles } from "lucide-react";
-import { EmptyState } from "@/components/ui/empty-state";
-import { StatusBadge } from "@/components/ui/status-badge";
-import { LinkButton } from "@/components/ui/button";
-import { getNavigationItem } from "@/lib/navigation";
-import { ShopifySettings } from "@/components/settings/shopify-settings";
-import { OpenAiTest } from "@/components/integrations/openai-test";
-import { getShopifyIntegrationStatus } from "@/server/services/shopify-sync-service";
+import { Settings2 } from "lucide-react";
+import { LorenzoWorkspace } from "@/components/lorenzo/lorenzo-workspace";
 import {
   CustomersTable,
   InventoryTable,
   OrdersTable,
   ProductsTable,
 } from "@/components/commerce/commerce-tables";
+import { OpenAiTest } from "@/components/integrations/openai-test";
+import { ShopifySettings } from "@/components/settings/shopify-settings";
+import { EmptyState } from "@/components/ui/empty-state";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { getNavigationItem } from "@/lib/navigation";
 import {
   getCustomersForPage,
   getInventoryForPage,
   getOrdersForPage,
   getProductsForPage,
 } from "@/server/services/commerce-service";
+import { getLorenzoWorkspace } from "@/server/services/lorenzo-service";
+import { getShopifyIntegrationStatus } from "@/server/services/shopify-sync-service";
 
 function CommercePage({
   title,
@@ -130,57 +131,8 @@ export default async function SectionPlaceholder({
       </div>
     );
   }
-  if (section === "astra") {
-    return (
-      <div className="page-wrap astra-page">
-        <div className="placeholder-header">
-          <div>
-            <p className="eyebrow">AETERNA OS / AI OPERATIVA</p>
-            <h2>Astra</h2>
-            <p>Un punto di osservazione intelligente per il lavoro quotidiano.</p>
-          </div>
-          <StatusBadge tone="disconnected">Non attivo</StatusBadge>
-        </div>
-        <section className="astra-hero" aria-labelledby="astra-workspace-title">
-          <div className="astra-hero-orbit" aria-hidden="true">
-            <Sparkles size={24} />
-          </div>
-          <div className="astra-hero-copy">
-            <p className="eyebrow">SPAZIO OPERATIVO</p>
-            <h1 id="astra-workspace-title">Astra è pronta quando lo sono i tuoi dati.</h1>
-            <p>
-              Questa superficie è predisposta per i report e le decisioni operative. Nessun report
-              viene inventato o generato automaticamente finché l&apos;integrazione non è
-              configurata.
-            </p>
-            <LinkButton href="/settings" variant="primary" icon={<Settings2 size={15} />}>
-              Apri impostazioni <ArrowUpRight size={14} />
-            </LinkButton>
-          </div>
-          <div className="astra-hero-mark" aria-hidden="true">
-            <Bot size={54} strokeWidth={1.2} />
-          </div>
-        </section>
-        <div className="astra-insight-grid">
-          <div className="astra-insight-card">
-            <span className="astra-insight-index">01</span>
-            <strong>Contesto reale</strong>
-            <p>Astra userà solo dati presenti nel database e nelle integrazioni autorizzate.</p>
-          </div>
-          <div className="astra-insight-card">
-            <span className="astra-insight-index">02</span>
-            <strong>Nessun rumore</strong>
-            <p>Lo spazio resta vuoto finché non esiste un report operativo verificabile.</p>
-          </div>
-          <div className="astra-insight-card">
-            <span className="astra-insight-index">03</span>
-            <strong>Prossimo passo</strong>
-            <p>Configura una fonte dati per rendere disponibili insight e priorità.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (section === "astra") return <LorenzoWorkspace workspace={await getLorenzoWorkspace()} />;
+
   return (
     <div className="page-wrap placeholder-page">
       <div className="placeholder-header">
