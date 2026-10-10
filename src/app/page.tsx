@@ -18,6 +18,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { LinkButton } from "@/components/ui/button";
 import { PriorityTask } from "@/components/dashboard/priority-task";
 import { RetryButton } from "@/components/ui/retry-button";
+import { OpenAiTest } from "@/components/integrations/openai-test";
 import {
   emptyOverviewData,
   getOverviewData,
@@ -306,6 +307,7 @@ export default async function OverviewPage() {
               </StatusBadge>
             </div>
           ))}
+          <OpenAiTest />
         </div>
       </section>
 
