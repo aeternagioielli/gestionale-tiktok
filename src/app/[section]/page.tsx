@@ -4,6 +4,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { LinkButton } from "@/components/ui/button";
 import { getNavigationItem } from "@/lib/navigation";
 import { ShopifySettings } from "@/components/settings/shopify-settings";
+import { OpenAiTest } from "@/components/integrations/openai-test";
 import { getShopifyIntegrationStatus } from "@/server/services/shopify-sync-service";
 import {
   CustomersTable,
@@ -125,6 +126,7 @@ export default async function SectionPlaceholder({
             lastSyncedAt: shopifyStatus.lastSyncedAt?.toISOString() ?? null,
           }}
         />
+        <OpenAiTest />
       </div>
     );
   }
