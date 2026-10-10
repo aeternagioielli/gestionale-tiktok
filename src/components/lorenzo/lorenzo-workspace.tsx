@@ -115,7 +115,13 @@ function errorMessage(status: number, payload: unknown): string {
   return "Impossibile generare l'analisi Lorenzo.";
 }
 
-export function LorenzoWorkspace({ workspace }: { workspace: LorenzoWorkspaceData }) {
+export function LorenzoWorkspace({
+  workspace,
+  embedded = false,
+}: {
+  workspace: LorenzoWorkspaceData;
+  embedded?: boolean;
+}) {
   const router = useRouter();
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,17 +148,19 @@ export function LorenzoWorkspace({ workspace }: { workspace: LorenzoWorkspaceDat
     }
   }
   return (
-    <div className="page-wrap astra-page">
-      <div className="placeholder-header">
-        <div>
-          <p className="eyebrow">AETERNA OS / LORENZO</p>
-          <h2>Lorenzo</h2>
-          <p>CEO AI: legge i dati aziendali disponibili, propone priorità e non esegue azioni.</p>
+    <div className={embedded ? styles.embedded : "page-wrap astra-page"}>
+      {!embedded && (
+        <div className="placeholder-header">
+          <div>
+            <p className="eyebrow">AETERNA OS / LORENZO</p>
+            <h2>Lorenzo</h2>
+            <p>CEO AI: legge i dati aziendali disponibili, propone priorità e non esegue azioni.</p>
+          </div>
+          <StatusBadge tone={workspace.databaseAvailable ? "success" : "disconnected"}>
+            {workspace.databaseAvailable ? "Dati disponibili" : "Dati non disponibili"}
+          </StatusBadge>
         </div>
-        <StatusBadge tone={workspace.databaseAvailable ? "success" : "disconnected"}>
-          {workspace.databaseAvailable ? "Dati disponibili" : "Dati non disponibili"}
-        </StatusBadge>
-      </div>
+      )}
       <section className={styles.hero} aria-labelledby="lorenzo-title">
         <div className={styles.mark} aria-hidden="true">
           <Bot size={35} strokeWidth={1.3} />

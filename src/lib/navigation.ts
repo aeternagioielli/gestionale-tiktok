@@ -72,9 +72,9 @@ export const navigationGroups: NavigationGroup[] = [
     ],
   },
   {
-    label: "AI",
+    label: "TEAM AI",
     items: [
-      { label: "Astra", href: "/astra", description: "Assistente intelligente", icon: Bot },
+      { label: "TEAM AI", href: "/astra", description: "Centro di controllo degli agenti", icon: Bot },
       {
         label: "Astra Reports",
         href: "/astra-reports",

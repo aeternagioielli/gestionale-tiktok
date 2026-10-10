@@ -100,7 +100,7 @@ function Topbar() {
       <div className="topbar-actions">
         <StatusBadge tone="disconnected">Integrazioni non collegate</StatusBadge>
         <LinkButton href="/astra" variant="ghost" icon={<Bot size={15} />}>
-          Parla con Astra <ArrowUpRight size={14} />
+          Apri TEAM AI <ArrowUpRight size={14} />
         </LinkButton>
       </div>
     </header>

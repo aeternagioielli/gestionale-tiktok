@@ -1,5 +1,5 @@
 import { Settings2 } from "lucide-react";
-import { LorenzoWorkspace } from "@/components/lorenzo/lorenzo-workspace";
+import { TeamAiDashboard } from "@/components/team-ai/team-ai-dashboard";
 import {
   CustomersTable,
   InventoryTable,
@@ -18,6 +18,7 @@ import {
   getProductsForPage,
 } from "@/server/services/commerce-service";
 import { getLorenzoWorkspace } from "@/server/services/lorenzo-service";
+import { getTeamAiDashboardData } from "@/server/services/team-ai-service";
 import { getShopifyIntegrationStatus } from "@/server/services/shopify-sync-service";
 
 function CommercePage({
@@ -131,7 +132,13 @@ export default async function SectionPlaceholder({
       </div>
     );
   }
-  if (section === "astra") return <LorenzoWorkspace workspace={await getLorenzoWorkspace()} />;
+  if (section === "astra") {
+    const [dashboard, lorenzoWorkspace] = await Promise.all([
+      getTeamAiDashboardData(),
+      getLorenzoWorkspace(),
+    ]);
+    return <TeamAiDashboard dashboard={dashboard} lorenzoWorkspace={lorenzoWorkspace} />;
+  }
 
   return (
     <div className="page-wrap placeholder-page">
