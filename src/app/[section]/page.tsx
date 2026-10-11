@@ -1,4 +1,5 @@
 import { Settings2 } from "lucide-react";
+import { notFound } from "next/navigation";
 import { TeamAiDashboard } from "@/components/team-ai/team-ai-dashboard";
 import {
   CustomersTable,
@@ -10,7 +11,7 @@ import { OpenAiTest } from "@/components/integrations/openai-test";
 import { ShopifySettings } from "@/components/settings/shopify-settings";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { getNavigationItem } from "@/lib/navigation";
+import { getNavigationItem, navigationItems } from "@/lib/navigation";
 import {
   getCustomersForPage,
   getInventoryForPage,
@@ -37,7 +38,7 @@ function CommercePage({
       <div className="placeholder-header">
         <div>
           <p className="eyebrow">AETERNA OS / {title.toUpperCase()}</p>
-          <h2>{title}</h2>
+          <h1>{title}</h1>
           <p>{description}</p>
         </div>
         <StatusBadge tone={hasData ? "success" : "disconnected"}>
@@ -55,12 +56,13 @@ export default async function SectionPlaceholder({
   params: Promise<{ section: string }>;
 }) {
   const { section } = await params;
+  if (!navigationItems.some((entry) => entry.href === `/${section}`)) notFound();
   const item = getNavigationItem(`/${section}`);
   if (section === "orders") {
     const orders = await getOrdersForPage().catch(() => []);
     return (
       <CommercePage
-        title="Orders"
+        title="Ordini"
         description="Ordini e vendite ricevuti dalle fonti collegate."
         hasData={orders.length > 0}
       >
@@ -72,7 +74,7 @@ export default async function SectionPlaceholder({
     const products = await getProductsForPage().catch(() => []);
     return (
       <CommercePage
-        title="Products"
+        title="Prodotti"
         description="Catalogo prodotti presente nel database."
         hasData={products.length > 0}
       >
@@ -84,7 +86,7 @@ export default async function SectionPlaceholder({
     const customers = await getCustomersForPage().catch(() => []);
     return (
       <CommercePage
-        title="Customers"
+        title="Clienti"
         description="Clienti ricevuti dalle fonti collegate."
         hasData={customers.length > 0}
       >
@@ -96,7 +98,7 @@ export default async function SectionPlaceholder({
     const inventory = await getInventoryForPage().catch(() => []);
     return (
       <CommercePage
-        title="Inventory"
+        title="Inventario"
         description="Disponibilità e quantità fornite dalle fonti collegate."
         hasData={inventory.length > 0}
       >
@@ -116,9 +118,9 @@ export default async function SectionPlaceholder({
       <div className="page-wrap settings-page">
         <div className="placeholder-header">
           <div>
-            <p className="eyebrow">AETERNA OS / SETTINGS</p>
-            <h2>Settings</h2>
-            <p>Stato delle integrazioni e configurazione locale.</p>
+            <p className="eyebrow">CONNESSIONI E SERVIZI</p>
+            <h1>Impostazioni</h1>
+            <p>Controlla le connessioni e gestisci le integrazioni disponibili.</p>
           </div>
           <StatusBadge tone="info">Configurazione server</StatusBadge>
         </div>
@@ -145,16 +147,22 @@ export default async function SectionPlaceholder({
       <div className="placeholder-header">
         <div>
           <p className="eyebrow">AETERNA OS / {item.label.toUpperCase()}</p>
-          <h2>{item.label}</h2>
+          <h1>{item.label}</h1>
           <p>{item.description}</p>
         </div>
-        <StatusBadge tone="demo">Fase 2 · Shell pronta</StatusBadge>
+        <StatusBadge tone="muted">Non ancora disponibile</StatusBadge>
       </div>
       <EmptyState
         icon={<Settings2 size={18} />}
         eyebrow="MODULO PREDISPOSTO"
-        title={`${item.label} sarà disponibile in una fase successiva.`}
-        description="La struttura di navigazione è pronta. In questa fase non vengono mostrati dati demo per non confonderli con i dati reali dell'azienda."
+        title="Questo modulo è in preparazione"
+        description={`Qui troverai: ${item.description.toLowerCase()}. Il modulo non è ancora operativo: nessun dato simulato e nessuna azione automatica.`}
+        href={section === "astra-reports" ? "/astra" : "/"}
+        action={
+          section === "astra-reports"
+            ? "Apri i report di Lorenzo in TEAM AI"
+            : "Torna alla panoramica"
+        }
       />
     </div>
   );

@@ -153,7 +153,7 @@ export function LorenzoWorkspace({
         <div className="placeholder-header">
           <div>
             <p className="eyebrow">AETERNA OS / LORENZO</p>
-            <h2>Lorenzo</h2>
+            <h1>Lorenzo</h1>
             <p>CEO AI: legge i dati aziendali disponibili, propone priorità e non esegue azioni.</p>
           </div>
           <StatusBadge tone={workspace.databaseAvailable ? "success" : "disconnected"}>
@@ -167,7 +167,7 @@ export function LorenzoWorkspace({
         </div>
         <div className={styles.heroCopy}>
           <p className="eyebrow">ANALISI SU RICHIESTA</p>
-          <h1 id="lorenzo-title">Una lettura chiara della situazione AETERNA.</h1>
+          <h2 id="lorenzo-title">Analisi della situazione aziendale</h2>
           <p>
             Ogni analisi usa solo gli ordini, i prodotti, l&apos;inventario, gli obiettivi, le
             attività e i report già presenti. Nessuna automazione viene avviata.

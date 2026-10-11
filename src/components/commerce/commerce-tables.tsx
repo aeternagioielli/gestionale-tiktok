@@ -38,17 +38,18 @@ export function OrdersTable({
     );
   }
   return (
-    <div className="table-wrap">
+    <div className="table-wrap" role="region" aria-label="Ordini: tabella scorrevole" tabIndex={0}>
       <table className="data-table">
+        <caption className="sr-only">Ordini</caption>
         <thead>
           <tr>
-            <th>Ordine</th>
-            <th>Data</th>
-            <th>Cliente</th>
-            <th>Totale</th>
-            <th>Stato</th>
-            <th>Pagamento</th>
-            <th>Spedizione</th>
+            <th scope="col">Ordine</th>
+            <th scope="col">Data</th>
+            <th scope="col">Cliente</th>
+            <th scope="col">Totale</th>
+            <th scope="col">Stato</th>
+            <th scope="col">Pagamento</th>
+            <th scope="col">Spedizione</th>
           </tr>
         </thead>
         <tbody>
@@ -85,15 +86,21 @@ export function ProductsTable({
       />
     );
   return (
-    <div className="table-wrap">
+    <div
+      className="table-wrap"
+      role="region"
+      aria-label="Prodotti: tabella scorrevole"
+      tabIndex={0}
+    >
       <table className="data-table">
+        <caption className="sr-only">Prodotti</caption>
         <thead>
           <tr>
-            <th>Prodotto</th>
-            <th>SKU</th>
-            <th>Prezzo</th>
-            <th>Stato</th>
-            <th>Disponibilità</th>
+            <th scope="col">Prodotto</th>
+            <th scope="col">SKU</th>
+            <th scope="col">Prezzo</th>
+            <th scope="col">Stato</th>
+            <th scope="col">Disponibilità</th>
           </tr>
         </thead>
         <tbody>
@@ -128,14 +135,15 @@ export function CustomersTable({
       />
     );
   return (
-    <div className="table-wrap">
+    <div className="table-wrap" role="region" aria-label="Clienti: tabella scorrevole" tabIndex={0}>
       <table className="data-table">
+        <caption className="sr-only">Clienti</caption>
         <thead>
           <tr>
-            <th>Nome</th>
-            <th>Email</th>
-            <th>Ordini</th>
-            <th>Ultimo ordine</th>
+            <th scope="col">Nome</th>
+            <th scope="col">Email</th>
+            <th scope="col">Ordini</th>
+            <th scope="col">Ultimo ordine</th>
           </tr>
         </thead>
         <tbody>
@@ -169,15 +177,21 @@ export function InventoryTable({
       />
     );
   return (
-    <div className="table-wrap">
+    <div
+      className="table-wrap"
+      role="region"
+      aria-label="Inventario: tabella scorrevole"
+      tabIndex={0}
+    >
       <table className="data-table">
+        <caption className="sr-only">Inventario</caption>
         <thead>
           <tr>
-            <th>Prodotto</th>
-            <th>SKU</th>
-            <th>Disponibile</th>
-            <th>Riservato</th>
-            <th>Aggiornato</th>
+            <th scope="col">Prodotto</th>
+            <th scope="col">SKU</th>
+            <th scope="col">Disponibile</th>
+            <th scope="col">Riservato</th>
+            <th scope="col">Aggiornato</th>
           </tr>
         </thead>
         <tbody>

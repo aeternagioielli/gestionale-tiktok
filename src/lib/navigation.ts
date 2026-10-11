@@ -28,43 +28,32 @@ export type NavigationGroup = { label: string; items: NavigationItem[] };
 
 export const navigationGroups: NavigationGroup[] = [
   {
-    label: "Workspace",
+    label: "Azienda",
     items: [
-      { label: "Overview", href: "/", description: "La vista generale di AETERNA", icon: Compass },
-      { label: "Analytics", href: "/analytics", description: "Dati e andamento", icon: BarChart3 },
-      { label: "Orders", href: "/orders", description: "Ordini e vendite", icon: ShoppingBag },
-      { label: "Products", href: "/products", description: "Catalogo prodotti", icon: Package },
       {
-        label: "Inventory",
+        label: "Panoramica",
+        href: "/",
+        description: "La vista generale di AETERNA",
+        icon: Compass,
+      },
+      { label: "Ordini", href: "/orders", description: "Ordini e vendite", icon: ShoppingBag },
+      { label: "Prodotti", href: "/products", description: "Catalogo prodotti", icon: Package },
+      {
+        label: "Inventario",
         href: "/inventory",
         description: "Scorte e disponibilità",
         icon: Boxes,
       },
-      { label: "Customers", href: "/customers", description: "Clienti e relazioni", icon: Users },
-      {
-        label: "Advertising",
-        href: "/advertising",
-        description: "Pubblicità e campagne",
-        icon: Megaphone,
-      },
-      { label: "Content", href: "/content", description: "Piano dei contenuti", icon: FileText },
-      {
-        label: "Creators",
-        href: "/creators",
-        description: "Creator e collaborazioni",
-        icon: Sparkles,
-      },
-      { label: "Website", href: "/website", description: "Andamento del sito", icon: Globe2 },
-      { label: "SEO", href: "/seo", description: "Visibilità organica", icon: Search },
+      { label: "Clienti", href: "/customers", description: "Clienti e relazioni", icon: Users },
     ],
   },
   {
-    label: "Operations",
+    label: "Operatività",
     items: [
-      { label: "Tasks", href: "/tasks", description: "Azioni operative", icon: CheckSquare },
-      { label: "Goals", href: "/goals", description: "Obiettivi e percorso", icon: Goal },
+      { label: "Attività", href: "/tasks", description: "Azioni operative", icon: CheckSquare },
+      { label: "Obiettivi", href: "/goals", description: "Obiettivi e percorso", icon: Goal },
       {
-        label: "Experiments",
+        label: "Esperimenti",
         href: "/experiments",
         description: "Test e apprendimento",
         icon: Code2,
@@ -72,11 +61,42 @@ export const navigationGroups: NavigationGroup[] = [
     ],
   },
   {
+    label: "Crescita",
+    items: [
+      { label: "Analytics", href: "/analytics", description: "Dati e andamento", icon: BarChart3 },
+      {
+        label: "Pubblicità",
+        href: "/advertising",
+        description: "Pubblicità e campagne",
+        icon: Megaphone,
+      },
+      { label: "Sito web", href: "/website", description: "Andamento del sito", icon: Globe2 },
+      { label: "SEO", href: "/seo", description: "Visibilità organica", icon: Search },
+    ],
+  },
+  {
+    label: "Contenuti",
+    items: [
+      { label: "Contenuti", href: "/content", description: "Piano dei contenuti", icon: FileText },
+      {
+        label: "Creator",
+        href: "/creators",
+        description: "Creator e collaborazioni",
+        icon: Sparkles,
+      },
+    ],
+  },
+  {
     label: "TEAM AI",
     items: [
-      { label: "TEAM AI", href: "/astra", description: "Centro di controllo degli agenti", icon: Bot },
       {
-        label: "Astra Reports",
+        label: "TEAM AI",
+        href: "/astra",
+        description: "Centro di controllo degli agenti",
+        icon: Bot,
+      },
+      {
+        label: "Report AI",
         href: "/astra-reports",
         description: "Storico dei report",
         icon: FileText,
@@ -84,12 +104,15 @@ export const navigationGroups: NavigationGroup[] = [
     ],
   },
   {
-    label: "System",
-    items: [{ label: "Settings", href: "/settings", description: "Impostazioni", icon: Settings2 }],
+    label: "Sistema",
+    items: [
+      { label: "Impostazioni", href: "/settings", description: "Impostazioni", icon: Settings2 },
+    ],
   },
 ];
 
 export const navigationItems = navigationGroups.flatMap((group) => group.items);
+
 export function getNavigationItem(pathname: string): NavigationItem {
   return navigationItems.find((item) => item.href === pathname) ?? navigationItems[0];
 }

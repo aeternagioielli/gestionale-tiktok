@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { LinkButton } from "@/components/ui/button";
-import { StatusBadge } from "@/components/ui/status-badge";
 
 export function EmptyState({
   eyebrow,
@@ -23,7 +22,6 @@ export function EmptyState({
       <div className="empty-copy">
         <div className="empty-state-top">
           {eyebrow && <span className="eyebrow">{eyebrow}</span>}
-          <StatusBadge tone="disconnected">Non collegato</StatusBadge>
         </div>
         <h3>{title}</h3>
         <p>{description}</p>

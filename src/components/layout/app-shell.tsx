@@ -13,10 +13,9 @@ import {
   Settings2,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { navigationGroups, getNavigationItem } from "@/lib/navigation";
 import { Icon } from "@/components/ui/icon";
-import { StatusBadge } from "@/components/ui/status-badge";
 import { LinkButton } from "@/components/ui/button";
 
 function Sidebar({ onClose }: { onClose?: () => void }) {
@@ -68,8 +67,7 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
         ))}
       </nav>
       <div className="sidebar-footer">
-        <StatusBadge tone="muted">Ambiente locale</StatusBadge>
-        <p>Nessun dato demo viene inserito automaticamente.</p>
+        <p>Spazio di lavoro AETERNA</p>
         <button className="sidebar-logout" type="button" onClick={handleLogout}>
           <LogOut size={13} /> Esci dalla sessione
         </button>
@@ -78,7 +76,7 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
   );
 }
 
-function Topbar() {
+function Topbar({ menuOpen, onMenuOpen }: { menuOpen: boolean; onMenuOpen: () => void }) {
   const pathname = usePathname();
   const current = getNavigationItem(pathname);
   return (
@@ -87,18 +85,21 @@ function Topbar() {
         <button
           className="mobile-menu"
           aria-label="Apri menu"
-          onClick={() => window.dispatchEvent(new Event("aeterna:open-menu"))}
+          aria-expanded={menuOpen}
+          aria-controls="mobile-navigation-drawer"
+          onClick={onMenuOpen}
         >
           <Menu size={20} />
         </button>
       </div>
       <div className="topbar-title">
-        <p className="eyebrow">AETERNA OS / {current.label.toUpperCase()}</p>
-        <h1>{current.label}</h1>
-        <p>{current.description}</p>
+        <nav aria-label="Percorso" className="breadcrumb">
+          <Link href="/">AETERNA OS</Link>
+          <span aria-hidden="true">/</span>
+          <span aria-current="page">{current.label}</span>
+        </nav>
       </div>
       <div className="topbar-actions">
-        <StatusBadge tone="disconnected">Integrazioni non collegate</StatusBadge>
         <LinkButton href="/astra" variant="ghost" icon={<Bot size={15} />}>
           Apri TEAM AI <ArrowUpRight size={14} />
         </LinkButton>
@@ -150,6 +151,7 @@ function MobileNav() {
             className={active ? "mobile-nav-item mobile-nav-item-active" : "mobile-nav-item"}
             href={item.href}
             key={item.href}
+            aria-current={active ? "page" : undefined}
           >
             <ItemIcon size={18} />
             <span>{item.label}</span>
@@ -162,12 +164,45 @@ function MobileNav() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const drawerRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   useEffect(() => {
-    const handler = () => setMenuOpen(true);
-    window.addEventListener("aeterna:open-menu", handler);
-    return () => window.removeEventListener("aeterna:open-menu", handler);
-  }, []);
+    if (!menuOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const drawer = drawerRef.current;
+    drawer?.querySelector<HTMLElement>(".mobile-close")?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+      if (event.key === "Tab" && drawer) {
+        const nodes = Array.from(
+          drawer.querySelectorAll<HTMLElement>("a[href], button:not([disabled])"),
+        ).filter((node) => node.getClientRects().length > 0);
+        const first = nodes[0];
+        const last = nodes[nodes.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    const desktop = window.matchMedia("(min-width: 1025px)");
+    const closeOnDesktop = () => {
+      if (desktop.matches) setMenuOpen(false);
+    };
+    desktop.addEventListener("change", closeOnDesktop);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape);
+      desktop.removeEventListener("change", closeOnDesktop);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [menuOpen]);
   if (pathname === "/login") {
     return (
       <div className="auth-shell">
@@ -177,16 +212,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
   return (
     <div className="app-shell">
-      <div className={menuOpen ? "sidebar-mobile open" : "sidebar-mobile"}>
-        <Sidebar onClose={() => setMenuOpen(false)} />
+      <a href="#main-content" className="skip-link">
+        Vai al contenuto
+      </a>
+      <div
+        ref={drawerRef}
+        role={menuOpen ? "dialog" : undefined}
+        aria-modal={menuOpen || undefined}
+        aria-label="Menu di navigazione"
+        className={menuOpen ? "sidebar-mobile open" : "sidebar-mobile"}
+        id="mobile-navigation-drawer"
+        aria-hidden={!menuOpen}
+      >
+        {menuOpen && (
+          <button
+            className="sidebar-backdrop"
+            type="button"
+            aria-label="Chiudi il menu di navigazione"
+            onClick={() => setMenuOpen(false)}
+          />
+        )}
+        {menuOpen && <Sidebar onClose={() => setMenuOpen(false)} />}
       </div>
       <div className="sidebar-desktop">
         <Sidebar />
       </div>
-      <div className="main-content">
-        <Topbar />
+      <div className="main-content" inert={menuOpen}>
+        <Topbar menuOpen={menuOpen} onMenuOpen={() => setMenuOpen(true)} />
         <ConnectionStatus />
-        <main>{children}</main>
+        <main id="main-content" tabIndex={-1}>
+          {children}
+        </main>
         <MobileNav />
       </div>
     </div>

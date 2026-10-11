@@ -138,7 +138,7 @@ export function TeamAiDashboard({
       <header className="placeholder-header">
         <div>
           <p className="eyebrow">AETERNA OS / TEAM AI</p>
-          <h2>TEAM AI</h2>
+          <h1>TEAM AI</h1>
           <p>Centro di controllo dei dipendenti AI. Le attività restano manuali e verificabili.</p>
         </div>
         <StatusBadge tone={dashboard.databaseAvailable ? "success" : "disconnected"}>
@@ -152,7 +152,7 @@ export function TeamAiDashboard({
         </div>
         <div>
           <p className="eyebrow">CONTROLLO OPERATIVO</p>
-          <h1 id="team-ai-title">Sei ruoli. Una sola fonte di verità.</h1>
+          <h2 id="team-ai-title">Il team, a colpo d’occhio</h2>
           <p>
             Stato e consumi derivano esclusivamente dai dati audit disponibili. Nessun agente viene
             avviato da questa dashboard.
@@ -168,12 +168,12 @@ export function TeamAiDashboard({
         />
         <Metric
           label="Agenti in esecuzione"
-          value={String(dashboard.runningAgents)}
+          value={dashboard.databaseAvailable ? String(dashboard.runningAgents) : "Non disponibile"}
           detail="Solo esecuzioni con prova persistita"
         />
         <Metric
           label="Token registrati"
-          value={formatTokens(dashboard.totalRecordedTokens)}
+          value={dashboard.databaseAvailable ? formatTokens(dashboard.totalRecordedTokens) : "Non disponibile"}
           detail="Totale non attribuito agli agenti"
         />
       </section>
@@ -188,25 +188,25 @@ export function TeamAiDashboard({
           <p>
             Il registro corrente non associa un&apos;invocazione a un dipendente AI. I valori sono
             completi solo dalla data di attivazione dell&apos;audit:{" "}
-            {formatDate(usage.trackingStartedAt)}.
+            {usage.trackingStartedAt ? formatDate(usage.trackingStartedAt) : "data non disponibile"}.
           </p>
         </div>
         <dl className={styles.auditMetrics}>
           <div>
             <dt>Input</dt>
-            <dd>{formatTokens(usage.inputTokens)}</dd>
+            <dd>{dashboard.databaseAvailable ? formatTokens(usage.inputTokens) : "Non disponibile"}</dd>
           </div>
           <div>
             <dt>Output</dt>
-            <dd>{formatTokens(usage.outputTokens)}</dd>
+            <dd>{dashboard.databaseAvailable ? formatTokens(usage.outputTokens) : "Non disponibile"}</dd>
           </div>
           <div>
             <dt>Totali</dt>
-            <dd>{formatTokens(usage.totalTokens)}</dd>
+            <dd>{dashboard.databaseAvailable ? formatTokens(usage.totalTokens) : "Non disponibile"}</dd>
           </div>
           <div>
             <dt>Invocazioni</dt>
-            <dd>{formatTokens(usage.invocationCount)}</dd>
+            <dd>{dashboard.databaseAvailable ? formatTokens(usage.invocationCount) : "Non disponibile"}</dd>
           </div>
         </dl>
         <p className={styles.costNote}>

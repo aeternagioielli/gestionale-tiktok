@@ -108,7 +108,7 @@ async function loadOverview(): Promise<OverviewData & { error?: string }> {
     return {
       ...emptyOverviewData(),
       databaseConfigured: true,
-      error: "Il database non è raggiungibile. Verifica la configurazione locale.",
+      error: "Il database non è raggiungibile. Riprova tra poco o verifica la configurazione.",
     };
   }
 }
@@ -123,8 +123,8 @@ export default async function OverviewPage() {
     <div className="page-wrap overview-page">
       <section className="welcome-row">
         <div>
-          <p className="eyebrow">MERCOLEDÌ, 8 OTTOBRE 2026 · PANORAMICA</p>
-          <h2>Buongiorno, Kevin.</h2>
+          <p className="eyebrow">IL TUO SPAZIO OPERATIVO</p>
+          <h1>Panoramica</h1>
           <p>Una vista chiara di ciò che succede e del prossimo passo per AETERNA.</p>
         </div>
         <StatusBadge
@@ -133,7 +133,7 @@ export default async function OverviewPage() {
           {data.error
             ? "Database non raggiungibile"
             : data.databaseConfigured
-              ? "Database locale"
+              ? "Database disponibile"
               : "Non ancora configurato"}
         </StatusBadge>
       </section>
@@ -147,7 +147,7 @@ export default async function OverviewPage() {
       <section className="hero-overview" aria-labelledby="performance-title">
         <div className="hero-copy">
           <p className="eyebrow">OBIETTIVO OPERATIVO</p>
-          <h1 id="performance-title">Come sta andando AETERNA</h1>
+          <h2 id="performance-title">Obiettivo aziendale</h2>
           {goal ? (
             <>
               <p>
@@ -368,10 +368,10 @@ export default async function OverviewPage() {
         <section className="content-section" aria-labelledby="astra-title">
           <SectionHeader
             eyebrow="AI OPERATIVA"
-            title="Astra"
+            title="Lorenzo · CEO"
             action={
               <StatusBadge tone={data.report ? "success" : "disconnected"}>
-                {data.report ? "Report disponibile" : "Non attivo"}
+                {data.report ? "Report disponibile" : "Nessun report"}
               </StatusBadge>
             }
           />
@@ -381,24 +381,24 @@ export default async function OverviewPage() {
                 <Sparkles size={20} />
               </div>
               <div>
-                <h3>ASTRA DAILY REPORT · {data.report.reportDate.toLocaleDateString("it-IT")}</h3>
+                <h3>REPORT CEO · {data.report.reportDate.toLocaleDateString("it-IT")}</h3>
                 <p>{data.report.generalSituation}</p>
                 <p>
                   <strong>Priorità #1:</strong> {data.report.priorityOne}
                 </p>
                 <LinkButton href="/astra" variant="primary" icon={<Bot size={15} />}>
-                  Parla con Astra
+                  Apri TEAM AI
                 </LinkButton>
               </div>
             </div>
           ) : (
             <EmptyState
               icon={<Bot size={18} />}
-              eyebrow="ASTRA DAILY REPORT"
+              eyebrow="REPORT CEO"
               title="Nessun report disponibile"
-              description="Astra non ha ancora generato un report. Nessun report viene creato automaticamente in questa fase."
+              description="Lorenzo non ha ancora generato un report. Nessun report viene creato automaticamente in questa fase."
               href="/astra"
-              action="Parla con Astra"
+              action="Apri TEAM AI"
             />
           )}
         </section>

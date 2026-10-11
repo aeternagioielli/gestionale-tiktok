@@ -21,7 +21,7 @@
   height: 62px;
   border-radius: 50%;
 }
-.hero h1,
+.hero h2,
 .audit h2,
 .reportHeading h2 {
   margin: 0;
@@ -36,7 +36,7 @@
 .audit > div p {
   margin: 8px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.65;
 }
 .metrics {
@@ -57,7 +57,7 @@
 .metric span,
 .metric small {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .metric strong {
@@ -102,7 +102,7 @@
 }
 .auditMetrics dt {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   text-transform: uppercase;
 }
 .auditMetrics dd {
@@ -116,7 +116,7 @@
   grid-column: 2;
   margin: 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.55;
 }
 .latestInvocation {
@@ -140,6 +140,7 @@
 }
 .agentTopline {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 9px;
@@ -166,7 +167,7 @@
 .activity p {
   margin: 6px 0 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.55;
 }
 .activity {
@@ -177,7 +178,7 @@
 }
 .activity > span {
   color: var(--gold-bright);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -193,7 +194,7 @@
 }
 .agentData dt {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.4;
   text-transform: uppercase;
 }
@@ -201,7 +202,7 @@
   margin: 4px 0 0;
   overflow-wrap: anywhere;
   color: var(--text-soft);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.45;
 }
@@ -210,15 +211,17 @@
   border-top: 1px solid var(--border);
 }
 .agentDetails summary {
+  min-height: 44px;
+  padding-block: 10px;
   cursor: pointer;
   color: var(--gold-bright);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 700;
 }
 .agentDetails p {
   margin: 9px 0 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.55;
 }
 .lorenzoReports {
