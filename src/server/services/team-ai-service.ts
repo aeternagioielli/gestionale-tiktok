@@ -80,6 +80,13 @@ export type TeamAiDashboardData = {
   totalRecordedTokens: number;
   usageScope: "FROM_AUDIT_ACTIVATION";
   unattributedUsage: UnattributedUsage;
+  recentActivities: {
+    id: string;
+    model: string;
+    taskType: string;
+    status: string;
+    createdAt: string;
+  }[];
 };
 
 function emptyUsage(): UnattributedUsage {
@@ -140,6 +147,7 @@ function emptyDashboard(): TeamAiDashboardData {
     totalRecordedTokens: 0,
     usageScope: "FROM_AUDIT_ACTIVATION",
     unattributedUsage: emptyUsage(),
+    recentActivities: [],
   };
 }
 
@@ -148,7 +156,7 @@ export async function getTeamAiDashboardData(): Promise<TeamAiDashboardData> {
   const config = getOpenAiConfig();
   try {
     const db = getDatabaseClient();
-    const [usage, firstInvocation, latestInvocation] = await Promise.all([
+    const [usage, firstInvocation, latestInvocation, recentActivities] = await Promise.all([
       db.aiInvocation.aggregate({
         _count: { _all: true },
         _sum: { inputTokens: true, outputTokens: true, totalTokens: true },
@@ -157,6 +165,11 @@ export async function getTeamAiDashboardData(): Promise<TeamAiDashboardData> {
       db.aiInvocation.findFirst({
         orderBy: { createdAt: "desc" },
         select: { model: true, taskType: true, status: true, createdAt: true },
+      }),
+      db.aiInvocation.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 6,
+        select: { id: true, model: true, taskType: true, status: true, createdAt: true },
       }),
     ]);
     const agents = buildTeamAiAgentCards({
@@ -189,6 +202,10 @@ export async function getTeamAiDashboardData(): Promise<TeamAiDashboardData> {
       totalRecordedTokens: unattributedUsage.totalTokens,
       usageScope: "FROM_AUDIT_ACTIVATION",
       unattributedUsage,
+      recentActivities: recentActivities.map((invocation) => ({
+        ...invocation,
+        createdAt: invocation.createdAt.toISOString(),
+      })),
     };
   } catch {
     const agents = buildTeamAiAgentCards({
@@ -205,6 +222,7 @@ export async function getTeamAiDashboardData(): Promise<TeamAiDashboardData> {
       totalRecordedTokens: 0,
       usageScope: "FROM_AUDIT_ACTIVATION",
       unattributedUsage: emptyUsage(),
+      recentActivities: [],
     };
   }
 }

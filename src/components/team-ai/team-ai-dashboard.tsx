@@ -1,128 +1,53 @@
-import {
-  Activity,
-  Bot,
-  BriefcaseBusiness,
-  CircleAlert,
-  CircleCheck,
-  Clock3,
-  Coins,
-  Megaphone,
-  PackageCheck,
-  Palette,
-  ReceiptText,
-  Sparkles,
-  UsersRound,
-} from "lucide-react";
-import type { ComponentType } from "react";
+import { Bot, Clock3, Database, Sparkles } from "lucide-react";
+import { AgentAvatar } from "@/components/team-ai/agent-avatar";
 import { LorenzoWorkspace } from "@/components/lorenzo/lorenzo-workspace";
 import { StatusBadge } from "@/components/ui/status-badge";
 import type { LorenzoWorkspace as LorenzoWorkspaceData } from "@/server/services/lorenzo-service";
 import type { TeamAiAgentCard, TeamAiDashboardData } from "@/server/services/team-ai-service";
 import styles from "./team-ai-dashboard.module.css";
 
-const icons: Record<
-  TeamAiAgentCard["id"],
-  ComponentType<{ size?: number; strokeWidth?: number }>
-> = {
-  lorenzo: BriefcaseBusiness,
-  marco: Megaphone,
-  giulia: Palette,
-  alessandro: PackageCheck,
-  matteo: ReceiptText,
-  francesca: Coins,
-};
-
-function formatTokens(value: number): string {
-  return new Intl.NumberFormat("it-IT").format(value);
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return "Nessuna esecuzione registrata";
+function formatDate(value: string): string {
   return new Intl.DateTimeFormat("it-IT", { dateStyle: "medium", timeStyle: "short" }).format(
     new Date(value),
   );
 }
 
-function statusPresentation(status: TeamAiAgentCard["status"]) {
-  if (status === "AVAILABLE")
-    return { tone: "success" as const, label: "Disponibile", icon: CircleCheck };
-  if (status === "RUNNING")
-    return { tone: "info" as const, label: "In esecuzione", icon: Activity };
-  if (status === "ERROR") return { tone: "error" as const, label: "Errore", icon: CircleAlert };
-  return { tone: "disconnected" as const, label: "Non configurato", icon: Clock3 };
+function agentStatus(agent: TeamAiAgentCard) {
+  if (agent.status === "RUNNING")
+    return { label: "In esecuzione", tone: "info" as const, state: "working" as const };
+  if (agent.status === "ERROR")
+    return { label: "Errore", tone: "error" as const, state: "failed" as const };
+  if (agent.status === "AVAILABLE")
+    return { label: "Pronto su richiesta", tone: "success" as const, state: "idle" as const };
+  return { label: "Non configurato", tone: "disconnected" as const, state: "idle" as const };
 }
 
-function Metric({ label, value, detail }: { label: string; value: string; detail: string }) {
+function AgentCard({ agent, ceo = false }: { agent: TeamAiAgentCard; ceo?: boolean }) {
+  const status = agentStatus(agent);
+  const stateClass =
+    `agent${status.state[0].toUpperCase()}${status.state.slice(1)}` as keyof typeof styles;
   return (
-    <div className={styles.metric}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{detail}</small>
-    </div>
-  );
-}
-
-function AgentCard({ agent }: { agent: TeamAiAgentCard }) {
-  const status = statusPresentation(agent.status);
-  const Icon = icons[agent.id];
-  const StatusIcon = status.icon;
-  return (
-    <article className={styles.agentCard}>
-      <div className={styles.agentTopline}>
-        <div className={styles.agentIcon} aria-hidden="true">
-          <Icon size={20} strokeWidth={1.5} />
-        </div>
-        <StatusBadge tone={status.tone}>
-          <StatusIcon size={11} aria-hidden="true" /> {status.label}
-        </StatusBadge>
+    <article className={`${styles.agentCard} ${ceo ? styles.ceoCard : ""} ${styles[stateClass]}`}>
+      <AgentAvatar id={agent.id} state={status.state} />
+      <div className={styles.agentCopy}>
+        <p className="eyebrow">{agent.role}</p>
+        <h3>{agent.name}</h3>
+        <p>{agent.scope}</p>
       </div>
-      <div>
-        <p className="eyebrow">{agent.role.toUpperCase()}</p>
-        <h2>{agent.name}</h2>
-        <p className={styles.scope}>{agent.scope}</p>
-      </div>
-      <div className={styles.activity}>
-        <span>Attività</span>
-        <p>{agent.currentActivity}</p>
-      </div>
-      <dl className={styles.agentData}>
-        <div>
-          <dt>Modello effettivo</dt>
-          <dd>{agent.actualModel ?? "Non attribuibile"}</dd>
-        </div>
-        <div>
-          <dt>Configurazione</dt>
-          <dd>{agent.configuredModel ?? "Non configurato"}</dd>
-        </div>
-        <div>
-          <dt>Token</dt>
-          <dd>
-            {agent.totalTokens === null ? "Non attribuibili" : formatTokens(agent.totalTokens)}
-          </dd>
-        </div>
-        <div>
-          <dt>Costo API stimato</dt>
-          <dd>
-            {agent.estimatedCostUsd === null
-              ? "Non calcolabile"
-              : `$${agent.estimatedCostUsd.toFixed(4)}`}
-          </dd>
-        </div>
-        <div>
-          <dt>Ultima esecuzione</dt>
-          <dd>{formatDate(agent.lastExecutionAt)}</dd>
-        </div>
-      </dl>
-      <details className={styles.agentDetails}>
-        <summary>Apri vista dettagliata</summary>
-        <p>{agent.statusReason}</p>
-        <p>
-          I dati di audit non contengono ancora un identificativo del dipendente AI: modello, token,
-          costo e ultima esecuzione non possono essere assegnati a questa scheda con certezza.
-        </p>
-      </details>
+      <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+      {agent.status === "RUNNING" && agent.currentActivity && (
+        <p className={styles.currentActivity}>{agent.currentActivity}</p>
+      )}
+      {agent.status !== "RUNNING" && <p className={styles.agentNote}>{agent.statusReason}</p>}
     </article>
   );
+}
+
+function activityStatus(status: string) {
+  if (status === "SUCCESS") return { label: "Completata", tone: "completed" as const };
+  if (status === "ERROR" || status === "FAILED") return { label: "Errore", tone: "error" as const };
+  if (status === "RUNNING") return { label: "In corso", tone: "info" as const };
+  return { label: status, tone: "muted" as const };
 }
 
 export function TeamAiDashboard({
@@ -132,99 +57,91 @@ export function TeamAiDashboard({
   dashboard: TeamAiDashboardData;
   lorenzoWorkspace: LorenzoWorkspaceData;
 }) {
+  const lorenzo = dashboard.agents.find((agent) => agent.id === "lorenzo");
+  const team = dashboard.agents.filter((agent) => agent.id !== "lorenzo");
   const usage = dashboard.unattributedUsage;
   return (
-    <div className="page-wrap">
-      <header className="placeholder-header">
+    <div className={`page-wrap ${styles.workspace}`}>
+      <header className={`${styles.header} placeholder-header`}>
         <div>
           <p className="eyebrow">AETERNA OS / TEAM AI</p>
           <h1>TEAM AI</h1>
-          <p>Centro di controllo dei dipendenti AI. Le attività restano manuali e verificabili.</p>
+          <p>Una gerarchia operativa pronta a crescere, senza automazioni attive.</p>
         </div>
         <StatusBadge tone={dashboard.databaseAvailable ? "success" : "disconnected"}>
-          {dashboard.databaseAvailable ? "Audit disponibile" : "Audit non disponibile"}
+          {dashboard.databaseAvailable ? "Registro disponibile" : "Registro non disponibile"}
         </StatusBadge>
       </header>
 
-      <section className={styles.hero} aria-labelledby="team-ai-title">
-        <div className={styles.heroMark} aria-hidden="true">
-          <UsersRound size={33} strokeWidth={1.35} />
+      <section className={styles.pyramid} aria-labelledby="team-ai-pyramid-title">
+        <div className={styles.pyramidIntro}>
+          <p className="eyebrow">STRUTTURA OPERATIVA</p>
+          <h2 id="team-ai-pyramid-title">Un CEO, cinque ruoli specializzati.</h2>
+          <p>Gli stati mostrano soltanto configurazione e attività verificabili nel sistema.</p>
         </div>
-        <div>
-          <p className="eyebrow">CONTROLLO OPERATIVO</p>
-          <h2 id="team-ai-title">Il team, a colpo d’occhio</h2>
-          <p>
-            Stato e consumi derivano esclusivamente dai dati audit disponibili. Nessun agente viene
-            avviato da questa dashboard.
-          </p>
-        </div>
-      </section>
-
-      <section className={styles.metrics} aria-label="Indicatori TEAM AI">
-        <Metric
-          label="Agenti configurati"
-          value={`${dashboard.configuredAgents} / ${dashboard.agents.length}`}
-          detail="Funzionalità realmente disponibili"
-        />
-        <Metric
-          label="Agenti in esecuzione"
-          value={dashboard.databaseAvailable ? String(dashboard.runningAgents) : "Non disponibile"}
-          detail="Solo esecuzioni con prova persistita"
-        />
-        <Metric
-          label="Token registrati"
-          value={dashboard.databaseAvailable ? formatTokens(dashboard.totalRecordedTokens) : "Non disponibile"}
-          detail="Totale non attribuito agli agenti"
-        />
-      </section>
-
-      <section className={styles.audit} aria-labelledby="audit-title">
-        <div className={styles.auditIcon} aria-hidden="true">
-          <Sparkles size={18} />
-        </div>
-        <div>
-          <p className="eyebrow">AUDIT AI</p>
-          <h2 id="audit-title">Consumi non attribuiti</h2>
-          <p>
-            Il registro corrente non associa un&apos;invocazione a un dipendente AI. I valori sono
-            completi solo dalla data di attivazione dell&apos;audit:{" "}
-            {usage.trackingStartedAt ? formatDate(usage.trackingStartedAt) : "data non disponibile"}.
-          </p>
-        </div>
-        <dl className={styles.auditMetrics}>
-          <div>
-            <dt>Input</dt>
-            <dd>{dashboard.databaseAvailable ? formatTokens(usage.inputTokens) : "Non disponibile"}</dd>
+        {lorenzo && (
+          <div className={styles.ceoWrap}>
+            <AgentCard agent={lorenzo} ceo />
           </div>
-          <div>
-            <dt>Output</dt>
-            <dd>{dashboard.databaseAvailable ? formatTokens(usage.outputTokens) : "Non disponibile"}</dd>
-          </div>
-          <div>
-            <dt>Totali</dt>
-            <dd>{dashboard.databaseAvailable ? formatTokens(usage.totalTokens) : "Non disponibile"}</dd>
-          </div>
-          <div>
-            <dt>Invocazioni</dt>
-            <dd>{dashboard.databaseAvailable ? formatTokens(usage.invocationCount) : "Non disponibile"}</dd>
-          </div>
-        </dl>
-        <p className={styles.costNote}>
-          Costo stimato: non calcolabile, perché non esiste un listino prezzi verificato configurato
-          nell&apos;applicazione.
-        </p>
-        {usage.latestInvocation && (
-          <p className={styles.latestInvocation}>
-            Ultima invocazione non attribuita: {usage.latestInvocation.model} ·{" "}
-            {usage.latestInvocation.taskType} · {formatDate(usage.latestInvocation.createdAt)}.
-          </p>
         )}
+        <div className={styles.teamGrid} aria-label="Agenti AI specializzati">
+          {team.map((agent) => (
+            <AgentCard agent={agent} key={agent.id} />
+          ))}
+        </div>
       </section>
 
-      <section className={styles.agents} aria-label="Dipendenti AI">
-        {dashboard.agents.map((agent) => (
-          <AgentCard key={agent.id} agent={agent} />
-        ))}
+      <section className={styles.auditStrip} aria-label="Stato audit AI">
+        <Database size={17} aria-hidden="true" />
+        <p>
+          <strong>Audit AI</strong> ·{" "}
+          {dashboard.databaseAvailable
+            ? `${usage.invocationCount} invocazioni registrate, non attribuite ai singoli agenti.`
+            : "Il database non è raggiungibile."}
+        </p>
+        <span>
+          {usage.trackingStartedAt
+            ? `Attivo dal ${formatDate(usage.trackingStartedAt)}`
+            : "Nessuna invocazione registrata"}
+        </span>
+      </section>
+
+      <section className={styles.activitySection} aria-labelledby="team-activity-title">
+        <div className={styles.sectionHeading}>
+          <div>
+            <p className="eyebrow">REGISTRO REALE</p>
+            <h2 id="team-activity-title">Attività recenti</h2>
+          </div>
+          <Sparkles size={18} aria-hidden="true" />
+        </div>
+        {dashboard.recentActivities.length ? (
+          <ol className={styles.activityList}>
+            {dashboard.recentActivities.map((activity) => {
+              const status = activityStatus(activity.status);
+              return (
+                <li key={activity.id}>
+                  <span className={styles.activityMarker} aria-hidden="true" />
+                  <div>
+                    <strong>Invocazione AI non attribuita</strong>
+                    <span>
+                      {activity.taskType} · {activity.model}
+                    </span>
+                  </div>
+                  <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+                  <time dateTime={activity.createdAt}>{formatDate(activity.createdAt)}</time>
+                </li>
+              );
+            })}
+          </ol>
+        ) : (
+          <div className={styles.activityEmpty}>
+            <Clock3 size={20} aria-hidden="true" />
+            <div>
+              <h3>Nessuna attività registrata</h3>
+              <p>Le invocazioni AI appariranno qui quando il sistema le registrerà nell’audit.</p>
+            </div>
+          </div>
+        )}
       </section>
 
       <section
