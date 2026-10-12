@@ -210,6 +210,7 @@ describe("ShopifyAdapter", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(response({ data: { currentAppInstallation: { accessScopes: [{ handle: "write_products" }] } } }))
       .mockResolvedValueOnce(response({ data: { products: { nodes: [] } } }))
+      .mockResolvedValueOnce(response({ data: { productVariants: { nodes: [] } } }))
       .mockResolvedValueOnce(response({ data: { productCreate: { product: { id: "gid://shopify/Product/9", handle: "aeterna-ring" }, userErrors: [] } } }))
       .mockResolvedValueOnce(response({ data: { productVariantsBulkCreate: { productVariants: [{ id: "gid://shopify/ProductVariant/9" }], userErrors: [] } } }));
     const adapter = new ShopifyAdapter(
@@ -225,6 +226,10 @@ describe("ShopifyAdapter", () => {
     const requests = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> });
     const create = requests.find((request) => request.query.includes("productCreate"));
     expect(create?.variables.product).toMatchObject({ status: "DRAFT", handle: "aeterna-ring" });
+    const variants = requests.find((request) => request.query.includes("productVariantsBulkCreate"));
+    expect(variants?.variables.variants).toEqual([
+      expect.objectContaining({ sku: "RING-S", price: "89.00" }),
+    ]);
     expect(requests.some((request) => request.query.includes("publishablePublish"))).toBe(false);
   });
 });

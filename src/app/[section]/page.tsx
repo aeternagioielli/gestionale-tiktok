@@ -91,7 +91,17 @@ export default async function SectionPlaceholder({
         product: {
           title: stored.product.title,
           handle: stored.product.handle,
-          variants: stored.product.variants.map((variant) => ({ title: variant.title, price: variant.price })),
+          descriptionHtml: stored.product.descriptionHtml,
+          seoTitle: stored.product.seoTitle,
+          seoDescription: stored.product.seoDescription,
+          productType: stored.product.productType,
+          materials: stored.product.materials,
+          images: stored.product.images,
+          variants: stored.product.variants.map((variant) => ({
+            title: variant.title,
+            sku: variant.sku,
+            price: variant.price,
+          })),
         },
       }] : [];
     });

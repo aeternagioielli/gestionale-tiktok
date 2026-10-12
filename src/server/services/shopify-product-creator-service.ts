@@ -4,6 +4,7 @@ import { AuditAction } from "@/generated/prisma/enums";
 import {
   ShopifyAdapter,
   ShopifyDuplicateProductError,
+  ShopifyDuplicateSkuError,
   ShopifyWriteAccessError,
 } from "@/integrations/shopify/shopify.adapter";
 import type { ShopifyDraftProduct, ShopifyDraftProductResult } from "@/integrations/shopify/shopify.types";
@@ -29,14 +30,14 @@ export const productFactsSchema = z
   .object({
     sourceReference: z.string().trim().min(3).max(120),
     productName: z.string().trim().min(2).max(140),
-    productType: z.string().trim().min(2).max(80).nullable().optional(),
+    productType: z.enum(["Collana", "Bracciale", "Anello", "Orecchini"]),
     factualDescription: z.string().trim().min(20).max(1_400),
     materials: z.array(z.string().trim().min(2).max(80)).min(1).max(12),
     variants: z
       .array(
         z.object({
           title: z.string().trim().min(1).max(100),
-          sku: z.string().trim().min(1).max(80).nullable().optional(),
+          sku: z.string().trim().min(1).max(80),
           price: priceSchema,
           optionValues: z
             .array(
@@ -61,7 +62,21 @@ export const productFactsSchema = z
       .max(MAX_IMAGES)
       .default([]),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    const seen = new Set<string>();
+    value.variants.forEach((variant, index) => {
+      const sku = variant.sku.trim().toUpperCase();
+      if (seen.has(sku)) {
+        context.addIssue({
+          code: "custom",
+          path: ["variants", index, "sku"],
+          message: "Ogni SKU deve essere unico.",
+        });
+      }
+      seen.add(sku);
+    });
+  });
 
 const generatedCopySchema = z
   .object({
@@ -132,6 +147,7 @@ export class ShopifyProductCreatorError extends Error {
       | "AI_OUTPUT_INVALID"
       | "WRITE_SCOPE_MISSING"
       | "DUPLICATE_PRODUCT"
+      | "DUPLICATE_SKU"
       | "WRITE_OUTCOME_UNKNOWN"
       | "PRODUCT_CREATION_FAILED",
   ) {
@@ -161,11 +177,11 @@ function proposalFrom(facts: ProductFacts, copy: z.infer<typeof generatedCopySch
     sourceReference: facts.sourceReference,
     product: {
       ...copy,
-      productType: facts.productType ?? null,
+      productType: facts.productType,
       materials: facts.materials,
       variants: facts.variants.map((variant) => ({
         ...variant,
-        sku: variant.sku ?? null,
+        sku: variant.sku,
       })),
       images: facts.images.map((image) => ({ ...image, altText: image.altText ?? null })),
     },
@@ -181,7 +197,7 @@ export function buildProductProposalPrompt(facts: ProductFacts): string {
     "VERIFIED FACTS:",
     JSON.stringify({
       productName: facts.productName,
-      productType: facts.productType ?? null,
+      productType: facts.productType,
       factualDescription: facts.factualDescription,
       materials: facts.materials,
       variants: facts.variants.map(({ title, optionValues }) => ({ title, optionValues })),
@@ -385,6 +401,8 @@ export async function createApprovedShopifyDraft(
       ? "WRITE_SCOPE_MISSING"
       : error instanceof ShopifyDuplicateProductError
         ? "DUPLICATE_PRODUCT"
+        : error instanceof ShopifyDuplicateSkuError
+          ? "DUPLICATE_SKU"
         : recordedProductId
           ? "WRITE_OUTCOME_UNKNOWN"
           : "PRODUCT_CREATION_FAILED";
@@ -395,6 +413,7 @@ export async function createApprovedShopifyDraft(
     await dependencies.writeAudit({ taskId, status: "FAILED", metadata: { code, productId: recordedProductId } }).catch(() => undefined);
     if (error instanceof ShopifyWriteAccessError) throw new ShopifyProductCreatorError(error.message, "WRITE_SCOPE_MISSING");
     if (error instanceof ShopifyDuplicateProductError) throw new ShopifyProductCreatorError(error.message, "DUPLICATE_PRODUCT");
+    if (error instanceof ShopifyDuplicateSkuError) throw new ShopifyProductCreatorError(error.message, "DUPLICATE_SKU");
     if (code === "WRITE_OUTCOME_UNKNOWN") throw new ShopifyProductCreatorError("La bozza potrebbe essere stata creata: verifica l'ID Shopify registrato prima di qualsiasi azione.", code);
     throw new ShopifyProductCreatorError("Shopify non ha creato la bozza prodotto.", code);
   }

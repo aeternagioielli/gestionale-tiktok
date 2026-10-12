@@ -86,6 +86,7 @@ type AccessScopesQuery = {
   currentAppInstallation: { accessScopes: Array<{ handle: string }> } | null;
 };
 type ProductHandleQuery = { products: { nodes: Array<{ id: string }> } };
+type ProductVariantSkuQuery = { productVariants: { nodes: Array<{ id: string }> } };
 type ProductCreateMutation = {
   productCreate: {
     product: { id: string; handle: string | null } | null;
@@ -203,6 +204,12 @@ const PRODUCT_BY_HANDLE_QUERY = `
   }
 `;
 
+const PRODUCT_VARIANT_BY_SKU_QUERY = `
+  query ProductVariantBySku($query: String!) {
+    productVariants(first: 1, query: $query) { nodes { id } }
+  }
+`;
+
 const PRODUCT_CREATE_MUTATION = `
   mutation CreateDraftProduct($product: ProductCreateInput!, $media: [CreateMediaInput!]) {
     productCreate(product: $product, media: $media) {
@@ -254,6 +261,13 @@ export class ShopifyDuplicateProductError extends Error {
   constructor() {
     super("Esiste gia un prodotto Shopify con questo handle.");
     this.name = "ShopifyDuplicateProductError";
+  }
+}
+
+export class ShopifyDuplicateSkuError extends Error {
+  constructor() {
+    super("Esiste gia una variante Shopify con uno degli SKU indicati.");
+    this.name = "ShopifyDuplicateSkuError";
   }
 }
 
@@ -496,6 +510,15 @@ export class ShopifyAdapter implements ExternalIntegrationAdapter {
       query: `handle:${input.handle}`,
     });
     if (duplicate.products.nodes.length > 0) throw new ShopifyDuplicateProductError();
+
+    const skus = input.variants.map((variant) => variant.sku).filter((sku): sku is string => Boolean(sku));
+    if (new Set(skus).size !== skus.length) throw new ShopifyDuplicateSkuError();
+    for (const sku of skus) {
+      const variant = await this.graphql<ProductVariantSkuQuery>(PRODUCT_VARIANT_BY_SKU_QUERY, {
+        query: `sku:${sku}`,
+      });
+      if (variant.productVariants.nodes.length > 0) throw new ShopifyDuplicateSkuError();
+    }
 
     const optionNames = [...new Set(input.variants.flatMap((variant) => variant.optionValues.map((value) => value.optionName)))];
     const product = await this.graphql<ProductCreateMutation>(PRODUCT_CREATE_MUTATION, {

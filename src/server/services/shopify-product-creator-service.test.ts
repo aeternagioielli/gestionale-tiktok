@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ShopifyDuplicateProductError, ShopifyWriteAccessError } from "@/integrations/shopify/shopify.adapter";
+import { ShopifyDuplicateProductError, ShopifyDuplicateSkuError, ShopifyWriteAccessError } from "@/integrations/shopify/shopify.adapter";
 import {
   createApprovedShopifyDraft,
   createShopifyProductProposal,
@@ -10,7 +10,7 @@ import type { AgentTaskView } from "@/server/services/agent-task-service";
 const facts = {
   sourceReference: "supplier-sheet-2026-10-12",
   productName: "AETERNA Silver Ring",
-  productType: "Jewelry",
+  productType: "Anello",
   factualDescription: "A verified sterling silver ring with a polished surface.",
   materials: ["Sterling silver"],
   variants: [{ title: "Small", sku: "AET-RING-S", price: "89.00", optionValues: [{ optionName: "Size", value: "Small" }] }],
@@ -58,6 +58,17 @@ function dependencies(): ShopifyProductCreatorDependencies & { tasks: Map<string
 }
 
 describe("Shopify product creator", () => {
+  it("rejects duplicate variant SKUs before invoking Alessandro", async () => {
+    const deps = dependencies();
+    await expect(
+      createShopifyProductProposal(
+        { ...facts, variants: [...facts.variants, { ...facts.variants[0]!, title: "Duplicate" }] },
+        deps,
+      ),
+    ).rejects.toMatchObject({ name: "ZodError" });
+    expect(deps.ai.generate).not.toHaveBeenCalled();
+  });
+
   it("stores an approval-gated proposal and never calls Shopify while preparing it", async () => {
     const deps = dependencies();
     const result = await createShopifyProductProposal(facts, deps);
@@ -98,5 +109,13 @@ describe("Shopify product creator", () => {
     deps.createDraft.mockRejectedValueOnce(new ShopifyDuplicateProductError());
     await expect(createApprovedShopifyDraft(proposal.proposalTask.id, deps)).rejects.toMatchObject({ code: "DUPLICATE_PRODUCT" });
     expect(deps.createDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a duplicate SKU from reaching a Shopify draft mutation", async () => {
+    const deps = dependencies();
+    const proposal = await createShopifyProductProposal(facts, deps);
+    deps.createDraft.mockRejectedValueOnce(new ShopifyDuplicateSkuError());
+    await expect(createApprovedShopifyDraft(proposal.proposalTask.id, deps)).rejects.toMatchObject({ code: "DUPLICATE_SKU" });
+    expect(deps.tasks.get(proposal.proposalTask.id)?.status).toBe("FAILED");
   });
 });
