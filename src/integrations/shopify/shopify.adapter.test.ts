@@ -296,4 +296,19 @@ describe("ShopifyAdapter", () => {
     expect(request.query).toContain("query VerifyDraftProduct");
     expect(request.query).not.toContain("mutation");
   });
+
+  it("updates only an existing variant SKU and never sends price or publication data", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(response({
+      data: { productVariantsBulkUpdate: { productVariants: [{ id: "gid://shopify/ProductVariant/88", sku: "COL-001" }], userErrors: [] } },
+    }));
+    const adapter = new ShopifyAdapter(
+      { storeDomain: "store.myshopify.com", credentials: { kind: "legacy_access_token", accessToken: "token" }, apiVersion: "2026-10" }, fetchMock,
+    );
+    await adapter.updateExistingVariantSku({ productId: "gid://shopify/Product/88", variantId: "gid://shopify/ProductVariant/88", sku: "COL-001" });
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { query: string; variables: { variants: Array<Record<string, unknown>> } };
+    expect(request.query).toContain("productVariantsBulkUpdate");
+    expect(request.variables.variants).toEqual([{ id: "gid://shopify/ProductVariant/88", sku: "COL-001" }]);
+    expect(JSON.stringify(request.variables)).not.toContain("price");
+    expect(request.query).not.toContain("productCreate");
+  });
 });

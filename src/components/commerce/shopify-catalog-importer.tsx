@@ -28,6 +28,11 @@ type ImportView = {
     failed: number;
   };
 };
+type SkuRepairView = {
+  batch: { id: string; status: string };
+  items: Array<{ taskId: string; name: string; sku: string; status: string; message: string | null }>;
+  totals: { total: number; ready: number; repaired: number; blocked: number; failed: number };
+};
 
 function responseError(response: Response, body: unknown): string {
   return body && typeof body === "object" && "error" in body && typeof body.error === "string"
@@ -50,7 +55,8 @@ function statusLabel(status: string): string {
 
 export function ShopifyCatalogImporter({ initialImport }: { initialImport: ImportView | null }) {
   const [catalogImport, setCatalogImport] = useState(initialImport);
-  const [busy, setBusy] = useState<"prepare" | "run" | "reconcile" | null>(null);
+  const [skuRepair, setSkuRepair] = useState<SkuRepairView | null>(null);
+  const [busy, setBusy] = useState<"prepare" | "run" | "reconcile" | "repair" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -136,6 +142,40 @@ export function ShopifyCatalogImporter({ initialImport }: { initialImport: Impor
     }
   }
 
+  async function repairMissingSkus() {
+    if (!catalogImport) return;
+    if (!window.confirm("Avvia la verifica in sola lettura degli SKU mancanti? Non verranno eseguite modifiche Shopify in questo passaggio.")) return;
+    setBusy("repair"); setError(null); setNotice(null);
+    try {
+      let repair = await request(`/api/agents/shopify-catalog-import/${encodeURIComponent(catalogImport.batch.id)}/sku-repair`);
+      // The repair plan is returned with the same envelope but different fields.
+      const repairData = repair as unknown as { batch: { id: string }; totals: { total: number; ready: number } };
+      setSkuRepair(repair as unknown as SkuRepairView);
+      for (let step = 0; step < repairData.totals.total; step += 1) {
+        repair = await request(`/api/agents/shopify-catalog-import/${encodeURIComponent(catalogImport.batch.id)}/sku-repair/${encodeURIComponent(repairData.batch.id)}/analyze`) as unknown as ImportView;
+        setSkuRepair(repair as unknown as SkuRepairView);
+      }
+      const ready = (repair as unknown as { totals: { ready: number } }).totals.ready;
+      setNotice(ready ? "Anteprima pronta: controlla gli SKU proposti e conferma separatamente la riparazione." : "Nessun prodotto e idoneo alla riparazione automatica. Verifica gli elementi bloccati manualmente.");
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Riparazione SKU interrotta senza retry automatici."); }
+    finally { setBusy(null); }
+  }
+
+  async function approveAndRunSkuRepair() {
+    if (!catalogImport || !skuRepair || !skuRepair.totals.ready) return;
+    if (!window.confirm(`${skuRepair.totals.ready} SKU sono pronti. Confermi l'assegnazione alle sole varianti esistenti?`)) return;
+    setBusy("repair"); setError(null);
+    try {
+      let repair = await request(`/api/agents/shopify-catalog-import/${encodeURIComponent(catalogImport.batch.id)}/sku-repair/${encodeURIComponent(skuRepair.batch.id)}/authorize`) as unknown as SkuRepairView;
+      setSkuRepair(repair);
+      for (let step = 0; step < skuRepair.totals.ready; step += 1) { repair = await request(`/api/agents/shopify-catalog-import/${encodeURIComponent(catalogImport.batch.id)}/sku-repair/${encodeURIComponent(skuRepair.batch.id)}/step`) as unknown as SkuRepairView; setSkuRepair(repair); }
+      const refreshed = await fetch(`/api/agents/shopify-catalog-import/${encodeURIComponent(catalogImport.batch.id)}`).then((r) => r.json()) as { data?: ImportView };
+      if (refreshed.data) setCatalogImport(refreshed.data);
+      setNotice("Riparazione completata: ogni SKU applicato e stato riletto su Shopify prima della riconciliazione.");
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Riparazione SKU interrotta senza retry automatici."); }
+    finally { setBusy(null); }
+  }
+
   const completed = catalogImport
     ? catalogImport.totals.draftCreated + catalogImport.totals.alreadyPresent + catalogImport.totals.requiresInformation + catalogImport.totals.failed
     : 0;
@@ -199,11 +239,27 @@ export function ShopifyCatalogImporter({ initialImport }: { initialImport: Impor
               {busy === "reconcile" ? "Verifica in corso..." : "Verifica prodotti gia creati"}
             </Button>
           )}
+          {catalogImport.items.some((item) => item.message?.startsWith("ERROR: RECONCILIATION_SKU_MISSING:")) && (
+            <Button type="button" disabled={busy !== null} onClick={() => void repairMissingSkus()} icon={busy === "repair" ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}>
+              {busy === "repair" ? "Riparazione in corso..." : "Ripara SKU prodotti esistenti"}
+            </Button>
+          )}
         </div>
       )}
 
       {notice && <p className={styles.notice} role="status">{notice}</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
+      {skuRepair && (
+        <div className={styles.callout} aria-live="polite">
+          <CheckCircle2 size={18} />
+          <div>
+            <strong>Anteprima riparazione SKU</strong>
+            <p>{skuRepair.totals.ready} pronti, {skuRepair.totals.blocked + skuRepair.totals.failed} bloccati, {skuRepair.totals.repaired} verificati.</p>
+            {skuRepair.items.filter((item) => item.status === "READY").slice(0, 18).map((item) => <small key={item.taskId}>{item.name}: variante esistente → {item.sku}</small>)}
+          </div>
+          {skuRepair.totals.ready > 0 && skuRepair.batch.status === "AWAITING_APPROVAL" && <Button type="button" disabled={busy !== null} onClick={() => void approveAndRunSkuRepair()} icon={<ShieldCheck size={15} />}>Approva e ripara SKU</Button>}
+        </div>
+      )}
       <div className={styles.list} role="list" aria-label="Stato prodotti catalogo">
         {rows.map((item) => (
           <article className={styles.row} key={item.taskId} role="listitem">

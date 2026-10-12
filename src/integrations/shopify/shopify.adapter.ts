@@ -567,6 +567,23 @@ export class ShopifyAdapter implements ExternalIntegrationAdapter {
     };
   }
 
+  /** Read-only SKU ownership check used before a narrowly scoped repair. */
+  async findProductIdBySku(sku: string): Promise<string | null> {
+    const response = await this.graphql<ProductVariantSkuQuery>(PRODUCT_VARIANT_BY_SKU_QUERY, { query: `sku:${sku}` });
+    return response.productVariants.nodes[0]?.product?.id ?? null;
+  }
+
+  /** Updates only an existing variant SKU. No price, inventory, product or publication fields are sent. */
+  async updateExistingVariantSku(input: { productId: string; variantId: string; sku: string }): Promise<void> {
+    const updated = await this.graphql<ProductVariantsBulkUpdateMutation>(PRODUCT_VARIANTS_BULK_UPDATE_MUTATION, {
+      productId: input.productId,
+      variants: [{ id: input.variantId, sku: input.sku }],
+    });
+    if (updated.productVariantsBulkUpdate.userErrors.length || updated.productVariantsBulkUpdate.productVariants[0]?.sku !== input.sku) {
+      throw new ShopifyCatalogVariantSetupError();
+    }
+  }
+
   /**
    * Creates one DRAFT with Shopify's standalone default variant, then assigns
    * the verified SKU to that existing variant. This avoids removing and
