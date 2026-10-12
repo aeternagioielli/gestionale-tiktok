@@ -165,3 +165,63 @@ export async function transitionAgentTask(input: {
   });
   return mapTask(task);
 }
+
+/**
+ * Explicitly reopens a failed task. The conditional update makes concurrent retry
+ * requests safe: only one caller can move FAILED to QUEUED and record the audit event.
+ */
+export async function retryFailedAgentTask(input: {
+  taskId: string;
+  actor?: AgentId;
+}): Promise<AgentTaskView | null> {
+  const taskId = taskIdSchema.parse(input.taskId);
+  const task = await getDatabaseClient().$transaction(async (tx) => {
+    const reopened = await tx.agentTask.updateMany({
+      where: { id: taskId, status: PrismaAgentTaskStatus.FAILED },
+      data: { status: PrismaAgentTaskStatus.QUEUED },
+    });
+    if (reopened.count !== 1) return null;
+    await tx.agentTaskAuditEvent.create({
+      data: {
+        taskId,
+        eventType: AgentTaskAuditEventType.STATUS_CHANGED,
+        fromStatus: PrismaAgentTaskStatus.FAILED,
+        toStatus: PrismaAgentTaskStatus.QUEUED,
+        actor: input.actor,
+        metadata: { reason: "EXPLICIT_RETRY" },
+      },
+    });
+    return tx.agentTask.findUnique({ where: { id: taskId } });
+  });
+  return task ? mapTask(task) : null;
+}
+
+/**
+ * Acquires the right to execute a queued task once. It intentionally returns null
+ * when another request already owns or completed the task instead of retrying work.
+ */
+export async function claimQueuedAgentTask(input: {
+  taskId: string;
+  actor?: AgentId;
+}): Promise<AgentTaskView | null> {
+  const taskId = taskIdSchema.parse(input.taskId);
+  const task = await getDatabaseClient().$transaction(async (tx) => {
+    const claimed = await tx.agentTask.updateMany({
+      where: { id: taskId, status: PrismaAgentTaskStatus.QUEUED },
+      data: { status: PrismaAgentTaskStatus.RUNNING },
+    });
+    if (claimed.count !== 1) return null;
+    await tx.agentTaskAuditEvent.create({
+      data: {
+        taskId,
+        eventType: AgentTaskAuditEventType.STATUS_CHANGED,
+        fromStatus: PrismaAgentTaskStatus.QUEUED,
+        toStatus: PrismaAgentTaskStatus.RUNNING,
+        actor: input.actor,
+        metadata: { reason: "EXECUTION_CLAIMED" },
+      },
+    });
+    return tx.agentTask.findUnique({ where: { id: taskId } });
+  });
+  return task ? mapTask(task) : null;
+}

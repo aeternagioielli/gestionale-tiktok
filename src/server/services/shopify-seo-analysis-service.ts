@@ -6,7 +6,9 @@ import type { ShopifyCatalogProduct } from "@/integrations/shopify/shopify.types
 import { OpenAiService, type AiInvocationResult } from "@/server/ai/openai-service";
 import { getDatabaseClient, isDatabaseConfigured } from "@/server/db";
 import {
+  claimQueuedAgentTask,
   createAgentTask,
+  retryFailedAgentTask,
   transitionAgentTask,
   type AgentTaskView,
 } from "@/server/services/agent-task-service";
@@ -33,18 +35,23 @@ type GeneratedAnalysis = z.infer<typeof generatedAnalysisSchema>;
 type AiGenerator = Pick<OpenAiService, "generate">;
 type TaskCreator = typeof createAgentTask;
 type TaskTransitioner = typeof transitionAgentTask;
+type TaskRetry = typeof retryFailedAgentTask;
+type TaskClaimer = typeof claimQueuedAgentTask;
 
 export type ShopifySeoAnalysisDependencies = {
   fetchCatalog: () => Promise<ShopifyCatalogProduct[]>;
   ai: AiGenerator;
   createTask: TaskCreator;
   transitionTask: TaskTransitioner;
+  retryFailedTask: TaskRetry;
+  claimTask: TaskClaimer;
   writeAudit: (input: { entityId?: string; status: "STARTED" | "COMPLETED" | "FAILED"; metadata?: Record<string, unknown> }) => Promise<void>;
   isDatabaseConfigured: () => boolean;
 };
 
 export type ShopifySeoAnalysisResult = {
   created: boolean;
+  retried: boolean;
   analysisTask: AgentTaskView;
   proposalTasks: AgentTaskView[];
   catalog: { totalProducts: number; activeProducts: number; analyzedProducts: number };
@@ -55,7 +62,8 @@ export class ShopifySeoAnalysisError extends Error {
     message: string,
     public readonly code:
       | "DATABASE_NOT_CONFIGURED"
-      | "CATALOG_EMPTY"
+      | "CATALOG_NO_ACTIVE_PRODUCTS"
+      | "CATALOG_INPUT_TOO_LARGE"
       | "AI_OUTPUT_INVALID"
       | "ANALYSIS_FAILED",
   ) {
@@ -205,6 +213,8 @@ function defaultDependencies(): ShopifySeoAnalysisDependencies {
     ai: new OpenAiService(),
     createTask: createAgentTask,
     transitionTask: transitionAgentTask,
+    retryFailedTask: retryFailedAgentTask,
+    claimTask: claimQueuedAgentTask,
     writeAudit: defaultWriteAudit,
     isDatabaseConfigured,
   };
@@ -215,7 +225,7 @@ function defaultDependencies(): ShopifySeoAnalysisDependencies {
  * every remotely consequential SEO proposal remains awaiting approval.
  */
 export async function runShopifySeoAnalysis(
-  input: { now?: Date; maxProducts?: number } = {},
+  input: { now?: Date; maxProducts?: number; retryFailed?: boolean } = {},
   dependencies: ShopifySeoAnalysisDependencies = defaultDependencies(),
 ): Promise<ShopifySeoAnalysisResult> {
   if (!dependencies.isDatabaseConfigured()) {
@@ -233,24 +243,57 @@ export async function runShopifySeoAnalysis(
     risk: "ANALYSIS",
     dedupeKey: `shopify-seo-analysis:${key}`,
   });
+  let analysisTask = parent.task;
+  let retried = false;
   if (!parent.created) {
+    if (parent.task.status === "FAILED" && input.retryFailed) {
+      const reopened = await dependencies.retryFailedTask({ taskId: parent.task.id, actor: "LORENZO" });
+      if (reopened) {
+        analysisTask = reopened;
+        retried = true;
+      } else {
+        return {
+          created: false,
+          retried: false,
+          analysisTask: parent.task,
+          proposalTasks: [],
+          catalog: { totalProducts: 0, activeProducts: 0, analyzedProducts: 0 },
+        };
+      }
+    } else {
+      return {
+        created: false,
+          retried: false,
+          analysisTask: parent.task,
+          proposalTasks: [],
+        catalog: { totalProducts: 0, activeProducts: 0, analyzedProducts: 0 },
+      };
+    }
+  }
+  const claimed = await dependencies.claimTask({ taskId: analysisTask.id, actor: "LORENZO" });
+  if (!claimed) {
     return {
       created: false,
-      analysisTask: parent.task,
+      retried: false,
+      analysisTask,
       proposalTasks: [],
       catalog: { totalProducts: 0, activeProducts: 0, analyzedProducts: 0 },
     };
   }
+  analysisTask = claimed;
+  await dependencies.writeAudit({ entityId: analysisTask.id, status: "STARTED", metadata: { maxProducts, retried } }).catch(() => undefined);
 
-  await dependencies.transitionTask({ taskId: parent.task.id, status: "RUNNING", actor: "LORENZO" });
-  await dependencies.writeAudit({ entityId: parent.task.id, status: "STARTED", metadata: { maxProducts } }).catch(() => undefined);
-
+  let diagnostics: Record<string, number> = {};
   try {
     const catalog = await dependencies.fetchCatalog();
     const activeProducts = catalog.filter((product) => product.status === "ACTIVE");
+    diagnostics = { totalProducts: catalog.length, activeProducts: activeProducts.length };
+    if (activeProducts.length === 0) {
+      throw new ShopifySeoAnalysisError("Il catalogo Shopify non contiene prodotti attivi analizzabili.", "CATALOG_NO_ACTIVE_PRODUCTS");
+    }
     const selected = selectProductsForPrompt(activeProducts, maxProducts);
     if (selected.length === 0) {
-      throw new ShopifySeoAnalysisError("Il catalogo Shopify non contiene prodotti attivi analizzabili.", "CATALOG_EMPTY");
+      throw new ShopifySeoAnalysisError("I dati del catalogo selezionati superano il limite sicuro per l'analisi.", "CATALOG_INPUT_TOO_LARGE");
     }
     const catalogSummary = {
       totalProducts: catalog.length,
@@ -273,14 +316,14 @@ export async function runShopifySeoAnalysis(
           source: "MANUAL",
           priority: 30,
           risk: "PUBLIC_SHOPIFY_CHANGE",
-          parentTaskId: parent.task.id,
+          parentTaskId: analysisTask.id,
           aiInvocationId: response.invocationId ?? undefined,
           dedupeKey: taskKey(`shopify-seo-proposal:${key}`, proposal.productExternalId),
         }),
       ),
     );
     const completed = await dependencies.transitionTask({
-      taskId: parent.task.id,
+      taskId: analysisTask.id,
       status: "COMPLETED",
       actor: "LORENZO",
       result: analysisResult(analysis, catalogSummary),
@@ -290,13 +333,18 @@ export async function runShopifySeoAnalysis(
       status: "COMPLETED",
       metadata: { ...catalogSummary, proposals: proposals.length, model: response.model, totalTokens: response.usage.totalTokens },
     }).catch(() => undefined);
-    return { created: true, analysisTask: completed, proposalTasks: proposals.map((proposal) => proposal.task), catalog: catalogSummary };
+    return { created: parent.created, retried, analysisTask: completed, proposalTasks: proposals.map((proposal) => proposal.task), catalog: catalogSummary };
   } catch (error) {
     const safeError = error instanceof ShopifySeoAnalysisError
       ? error
       : new ShopifySeoAnalysisError("L'analisi SEO Shopify non e stata completata.", "ANALYSIS_FAILED");
-    await dependencies.transitionTask({ taskId: parent.task.id, status: "FAILED", actor: "LORENZO" }).catch(() => undefined);
-    await dependencies.writeAudit({ entityId: parent.task.id, status: "FAILED", metadata: { code: safeError.code } }).catch(() => undefined);
+    await dependencies.transitionTask({
+      taskId: analysisTask.id,
+      status: "FAILED",
+      actor: "LORENZO",
+      result: `Analisi SEO non completata. Codice: ${safeError.code}.`,
+    }).catch(() => undefined);
+    await dependencies.writeAudit({ entityId: analysisTask.id, status: "FAILED", metadata: { code: safeError.code, ...diagnostics } }).catch(() => undefined);
     throw safeError;
   }
 }

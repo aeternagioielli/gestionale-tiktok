@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { ShopifyApiError, ShopifyAuthenticationError, ShopifyConfigurationError } from "@/integrations/shopify/shopify.adapter";
 import { OpenAiConfigurationError, OpenAiRequestError } from "@/server/ai/openai-service";
 import { ShopifySeoAnalysisError, runShopifySeoAnalysis } from "@/server/services/shopify-seo-analysis-service";
@@ -10,9 +11,18 @@ export const dynamic = "force-dynamic";
  * Protected by the application proxy. This is an explicit manual action, never a scheduler.
  * It reads Shopify only and creates approval-gated local proposals.
  */
-export async function POST() {
+const requestSchema = z.object({ retryFailed: z.boolean().optional() }).strict();
+
+export async function POST(request: Request) {
+  let retryFailed = false;
   try {
-    const result = await runShopifySeoAnalysis();
+    const body = await request.text();
+    if (body) retryFailed = requestSchema.parse(JSON.parse(body)).retryFailed ?? false;
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida." }, { status: 400 });
+  }
+  try {
+    const result = await runShopifySeoAnalysis({ retryFailed });
     return NextResponse.json({ data: result }, { status: result.created ? 201 : 200 });
   } catch (error) {
     if (error instanceof ShopifyConfigurationError)
@@ -29,7 +39,7 @@ export async function POST() {
     if (error instanceof OpenAiRequestError)
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.code === "RATE_LIMITED" ? 429 : 502 });
     if (error instanceof ShopifySeoAnalysisError) {
-      const status = error.code === "DATABASE_NOT_CONFIGURED" ? 503 : error.code === "CATALOG_EMPTY" ? 422 : 502;
+      const status = error.code === "DATABASE_NOT_CONFIGURED" ? 503 : error.code.startsWith("CATALOG_") ? 422 : 502;
       return NextResponse.json({ error: error.message, code: error.code }, { status });
     }
     return NextResponse.json({ error: "Analisi SEO Shopify non riuscita." }, { status: 500 });

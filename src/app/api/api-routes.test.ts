@@ -4,6 +4,7 @@ import { GET as getTasks, POST as createTask } from "@/app/api/tasks/route";
 import { POST as completeTask } from "@/app/api/tasks/[id]/complete/route";
 import { GET as getGoals } from "@/app/api/goals/route";
 import { GET as getShopify, POST as syncShopify } from "@/app/api/integrations/shopify/route";
+import { POST as runShopifySeoAnalysis } from "@/app/api/agents/shopify-seo-analysis/route";
 
 describe("internal API without a configured database", () => {
   it("returns an explicit empty overview", async () => {
@@ -44,5 +45,15 @@ describe("internal API without a configured database", () => {
   it("does not start a Shopify sync without credentials", async () => {
     const response = await syncShopify();
     expect([409, 503]).toContain(response.status);
+  });
+
+  it("rejects an invalid Shopify SEO retry request before contacting providers", async () => {
+    const response = await runShopifySeoAnalysis(
+      new Request("http://localhost/api/agents/shopify-seo-analysis", {
+        method: "POST",
+        body: JSON.stringify({ retryFailed: "yes" }),
+      }),
+    );
+    expect(response.status).toBe(400);
   });
 });

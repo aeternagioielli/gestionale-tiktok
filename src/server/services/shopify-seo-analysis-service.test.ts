@@ -75,6 +75,8 @@ function dependencies(overrides: Partial<ShopifySeoAnalysisDependencies> = {}): 
       return { task: { ...created, parentTaskId: input.parentTaskId ?? null }, created: true };
     }),
     transitionTask: vi.fn().mockImplementation(async (input: { taskId: string; status: AgentTaskView["status"] }) => task(input.taskId, "LORENZO", input.status)),
+    retryFailedTask: vi.fn().mockResolvedValue(task("retried", "LORENZO", "QUEUED")),
+    claimTask: vi.fn().mockImplementation(async (input: { taskId: string }) => task(input.taskId, "LORENZO", "RUNNING")),
     writeAudit: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   } as ShopifySeoAnalysisDependencies;
@@ -110,6 +112,43 @@ describe("Shopify SEO analysis", () => {
     expect(result.created).toBe(false);
     expect(deps.fetchCatalog).not.toHaveBeenCalled();
     expect(deps.ai.generate).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed daily analysis only after an explicit, atomic retry claim", async () => {
+    const failed = task("failed", "LORENZO", "FAILED");
+    const deps = dependencies({ createTask: vi.fn().mockResolvedValue({ task: failed, created: false }) as never });
+    const result = await runShopifySeoAnalysis({ now: new Date("2026-10-12T11:00:00.000Z"), retryFailed: true }, deps);
+    expect(result).toMatchObject({ created: false, retried: true, analysisTask: { status: "COMPLETED" } });
+    expect(deps.retryFailedTask).toHaveBeenCalledWith({ taskId: "failed", actor: "LORENZO" });
+    expect(deps.claimTask).toHaveBeenCalledWith({ taskId: "retried", actor: "LORENZO" });
+    expect(deps.ai.generate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not run when another request already acquired the retry", async () => {
+    const failed = task("failed", "LORENZO", "FAILED");
+    const deps = dependencies({
+      createTask: vi.fn().mockResolvedValue({ task: failed, created: false }) as never,
+      retryFailedTask: vi.fn().mockResolvedValue(null) as never,
+    });
+    const result = await runShopifySeoAnalysis({ retryFailed: true }, deps);
+    expect(result.created).toBe(false);
+    expect(deps.fetchCatalog).not.toHaveBeenCalled();
+    expect(deps.ai.generate).not.toHaveBeenCalled();
+  });
+
+  it("records non-sensitive catalog diagnostics and leaves a failed task visibly failed", async () => {
+    const deps = dependencies({ fetchCatalog: vi.fn().mockResolvedValue([]) });
+    await expect(runShopifySeoAnalysis({ now: new Date("2026-10-14T10:00:00.000Z") }, deps)).rejects.toMatchObject({
+      code: "CATALOG_NO_ACTIVE_PRODUCTS",
+    });
+    expect(deps.transitionTask).toHaveBeenCalledWith(expect.objectContaining({
+      status: "FAILED",
+      result: "Analisi SEO non completata. Codice: CATALOG_NO_ACTIVE_PRODUCTS.",
+    }));
+    expect(deps.writeAudit).toHaveBeenCalledWith(expect.objectContaining({
+      status: "FAILED",
+      metadata: { code: "CATALOG_NO_ACTIVE_PRODUCTS", totalProducts: 0, activeProducts: 0 },
+    }));
   });
 
   it("rejects an AI proposal for a product absent from the real catalog", async () => {
