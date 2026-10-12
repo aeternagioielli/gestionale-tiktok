@@ -2,6 +2,7 @@ import type { ExternalIntegrationAdapter, IntegrationHealth } from "@/integratio
 import type {
   ShopifyConfig,
   ShopifyCustomer,
+  ShopifyCatalogProduct,
   ShopifyOrder,
   ShopifyOrderItem,
   ShopifyProduct,
@@ -30,6 +31,8 @@ type RawCustomer = {
   lastOrder?: { createdAt?: string | null } | null;
 };
 type RawVariant = {
+  id: string;
+  title?: string | null;
   sku?: string | null;
   price?: string | null;
   inventoryQuantity?: number | null;
@@ -37,10 +40,14 @@ type RawVariant = {
 type RawProduct = {
   id: string;
   title: string;
+  handle?: string | null;
   descriptionHtml?: string | null;
+  seo?: { title?: string | null; description?: string | null } | null;
   productType?: string | null;
   status?: string | null;
-  featuredImage?: { url?: string | null } | null;
+  updatedAt?: string | null;
+  featuredImage?: { url?: string | null; altText?: string | null } | null;
+  images?: { nodes: Array<{ url?: string | null; altText?: string | null }> } | null;
   variants: { nodes: RawVariant[]; pageInfo: PageInfo };
 };
 type RawLineItem = {
@@ -124,10 +131,12 @@ const PRODUCTS_QUERY = `
   query ProductsPage($after: String) {
     products(first: 250, after: $after, sortKey: TITLE) {
       nodes {
-        id title descriptionHtml productType status
-        featuredImage { url }
+        id title handle descriptionHtml productType status updatedAt
+        seo { title description }
+        featuredImage { url altText }
+        images(first: 10) { nodes { url altText } }
         variants(first: 250) {
-          nodes { sku price inventoryQuantity }
+          nodes { id title sku price inventoryQuantity }
           pageInfo { hasNextPage endCursor }
         }
       }
@@ -152,7 +161,7 @@ const PRODUCT_VARIANTS_QUERY = `
   query ProductVariants($id: ID!, $after: String) {
     product(id: $id) {
       variants(first: 250, after: $after) {
-        nodes { sku price inventoryQuantity }
+        nodes { id title sku price inventoryQuantity }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -181,17 +190,104 @@ export class ShopifyApiError extends Error {
   }
 }
 
+export class ShopifyAuthenticationError extends Error {
+  constructor(
+    message: string,
+    public readonly code: "STORE_NOT_ELIGIBLE" | "TOKEN_REQUEST_FAILED",
+  ) {
+    super(message);
+    this.name = "ShopifyAuthenticationError";
+  }
+}
+
 export function getShopifyConfig(
   env: Record<string, string | undefined> = process.env,
 ): ShopifyConfig | null {
   const storeDomain = env.SHOPIFY_STORE_DOMAIN?.trim()
     .replace(/^https?:\/\//, "")
     .replace(/\/$/, "");
+  const clientId = env.SHOPIFY_CLIENT_ID?.trim();
+  const clientSecret = env.SHOPIFY_CLIENT_SECRET?.trim();
   const accessToken = env.SHOPIFY_ACCESS_TOKEN?.trim();
   const apiVersion = env.SHOPIFY_API_VERSION?.trim() || DEFAULT_SHOPIFY_API_VERSION;
-  if (!storeDomain || !accessToken || !/^\d{4}-\d{2}$/.test(apiVersion)) return null;
-  return { storeDomain, accessToken, apiVersion };
+  if (!storeDomain || !/^\d{4}-\d{2}$/.test(apiVersion)) return null;
+  if (clientId && clientSecret) {
+    return { storeDomain, apiVersion, credentials: { kind: "client_credentials", clientId, clientSecret } };
+  }
+  // Kept only for existing legacy installations. Dev Dashboard applications use client credentials.
+  if (accessToken)
+    return { storeDomain, apiVersion, credentials: { kind: "legacy_access_token", accessToken } };
+  return null;
 }
+
+type TokenResponse = { access_token?: unknown; expires_in?: unknown; error?: unknown; error_description?: unknown };
+
+export interface ShopifyAccessTokenProvider {
+  getAccessToken(config: ShopifyConfig): Promise<string>;
+}
+
+type CachedToken = { value: string; expiresAt: number };
+
+export class ShopifyClientCredentialsTokenProvider implements ShopifyAccessTokenProvider {
+  private readonly cache = new Map<string, CachedToken>();
+  private readonly inFlight = new Map<string, Promise<string>>();
+
+  constructor(private readonly fetchImpl: FetchLike = fetch) {}
+
+  async getAccessToken(config: ShopifyConfig): Promise<string> {
+    if (config.credentials.kind === "legacy_access_token") return config.credentials.accessToken;
+    const key = `${config.storeDomain}:${config.credentials.clientId}`;
+    const cached = this.cache.get(key);
+    // Shopify client-credential tokens last 24 hours. Refresh five minutes before expiry.
+    if (cached && cached.expiresAt > Date.now() + 5 * 60_000) return cached.value;
+    const pending = this.inFlight.get(key);
+    if (pending) return pending;
+    const request = this.requestToken(config, key);
+    this.inFlight.set(key, request);
+    try {
+      return await request;
+    } finally {
+      this.inFlight.delete(key);
+    }
+  }
+
+  private async requestToken(config: ShopifyConfig, cacheKey: string): Promise<string> {
+    if (config.credentials.kind !== "client_credentials") return config.credentials.accessToken;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `https://${config.storeDomain}/admin/oauth/access_token`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "client_credentials",
+            client_id: config.credentials.clientId,
+            client_secret: config.credentials.clientSecret,
+          }),
+        },
+      );
+    } catch {
+      throw new ShopifyAuthenticationError("Impossibile ottenere un token Shopify.", "TOKEN_REQUEST_FAILED");
+    }
+    const payload = (await response.json().catch(() => null)) as TokenResponse | null;
+    const error = typeof payload?.error === "string" ? payload.error : "";
+    if (!response.ok || !payload || typeof payload.access_token !== "string" || !payload.access_token) {
+      if (error === "shop_not_permitted") {
+        throw new ShopifyAuthenticationError(
+          "Lo store non e idoneo al Client Credentials Grant: app e store devono appartenere alla stessa organizzazione Shopify.",
+          "STORE_NOT_ELIGIBLE",
+        );
+      }
+      throw new ShopifyAuthenticationError("Shopify non ha rilasciato un token di accesso.", "TOKEN_REQUEST_FAILED");
+    }
+    const expiresIn = typeof payload.expires_in === "number" && payload.expires_in > 0 ? payload.expires_in : 60 * 60;
+    this.cache.set(cacheKey, { value: payload.access_token, expiresAt: Date.now() + expiresIn * 1_000 });
+    return payload.access_token;
+  }
+}
+
+const defaultTokenProvider = new ShopifyClientCredentialsTokenProvider();
 
 function amount(value: string | null | undefined): number | null {
   if (value === null || value === undefined || value.trim() === "") return null;
@@ -281,6 +377,7 @@ export class ShopifyAdapter implements ExternalIntegrationAdapter {
   constructor(
     private readonly config: ShopifyConfig | null = getShopifyConfig(),
     private readonly fetchImpl: FetchLike = fetch,
+    private readonly tokenProvider: ShopifyAccessTokenProvider = defaultTokenProvider,
   ) {}
 
   async getHealth(): Promise<IntegrationHealth> {
@@ -308,18 +405,24 @@ export class ShopifyAdapter implements ExternalIntegrationAdapter {
     return { orders, products, customers };
   }
 
+  /** Reads the catalog only. It never includes customers, orders or mutations. */
+  async fetchCatalog(): Promise<ShopifyCatalogProduct[]> {
+    return this.fetchCatalogProducts();
+  }
+
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     if (!this.config) throw new ShopifyConfigurationError();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20_000);
     try {
+      const accessToken = await this.tokenProvider.getAccessToken(this.config);
       const response = await this.fetchImpl(
         `https://${this.config.storeDomain}/admin/api/${this.config.apiVersion}/graphql.json`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-Shopify-Access-Token": this.config.accessToken,
+            "X-Shopify-Access-Token": accessToken,
           },
           body: JSON.stringify({ query, variables }),
           signal: controller.signal,
@@ -347,7 +450,7 @@ export class ShopifyAdapter implements ExternalIntegrationAdapter {
       if (!payload.data) throw new ShopifyApiError("Risposta Shopify senza dati.", 502);
       return payload.data;
     } catch (error) {
-      if (error instanceof ShopifyApiError || error instanceof ShopifyConfigurationError)
+      if (error instanceof ShopifyApiError || error instanceof ShopifyConfigurationError || error instanceof ShopifyAuthenticationError)
         throw error;
       if (error instanceof DOMException && error.name === "AbortError") {
         throw new ShopifyApiError("Timeout nella connessione a Shopify.", 504);
@@ -413,28 +516,62 @@ export class ShopifyAdapter implements ExternalIntegrationAdapter {
   }
 
   private async fetchProducts(): Promise<ShopifyProduct[]> {
-    const products: ShopifyProduct[] = [];
+    const catalog = await this.fetchCatalogProducts();
+    return catalog.map((product) => {
+      const variant = product.variants[0];
+      return {
+        externalId: product.externalId,
+        name: product.title,
+        description: product.descriptionHtml,
+        sku: variant?.sku ?? null,
+        price: variant?.price ?? null,
+        currency: null,
+        status: product.status === "ARCHIVED" ? "ARCHIVED" : "ACTIVE",
+        category: product.productType,
+        imageUrl: product.imageUrl,
+        availableQty: product.availableQty,
+      };
+    });
+  }
+
+  private async fetchCatalogProducts(): Promise<ShopifyCatalogProduct[]> {
+    const products: ShopifyCatalogProduct[] = [];
     let after: string | null = null;
     do {
       const page: ProductsPage = await this.graphql<ProductsPage>(PRODUCTS_QUERY, { after });
       for (const raw of page.products.nodes) {
         const variants = await this.fetchAllVariants(raw.id, raw.variants);
-        const variant = variants[0];
+        const availableQty = variants.some(
+          (item) => item.inventoryQuantity !== null && item.inventoryQuantity !== undefined,
+        )
+          ? variants.reduce((total, item) => total + (item.inventoryQuantity ?? 0), 0)
+          : null;
         products.push({
           externalId: raw.id,
-          name: raw.title,
-          description: raw.descriptionHtml ?? null,
-          sku: variant?.sku ?? null,
-          price: amount(variant?.price),
-          currency: null,
-          status: raw.status === "ARCHIVED" ? "ARCHIVED" : "ACTIVE",
-          category: raw.productType ?? null,
+          title: raw.title,
+          handle: raw.handle ?? null,
+          descriptionHtml: raw.descriptionHtml ?? null,
+          seoTitle: raw.seo?.title ?? null,
+          seoDescription: raw.seo?.description ?? null,
           imageUrl: raw.featuredImage?.url ?? null,
-          availableQty: variants.some(
-            (item) => item.inventoryQuantity !== null && item.inventoryQuantity !== undefined,
-          )
-            ? variants.reduce((total, item) => total + (item.inventoryQuantity ?? 0), 0)
-            : null,
+          imageAltText: raw.featuredImage?.altText ?? null,
+          images: (raw.images?.nodes ?? [])
+            .filter((image): image is { url: string; altText?: string | null } => Boolean(image.url))
+            .map((image) => ({ url: image.url, altText: image.altText ?? null })),
+          status:
+            raw.status === "ACTIVE" || raw.status === "ARCHIVED" || raw.status === "DRAFT" || raw.status === "UNLISTED"
+              ? raw.status
+              : "UNKNOWN",
+          productType: raw.productType ?? null,
+          updatedAt: date(raw.updatedAt),
+          variants: variants.map((variant) => ({
+            externalId: variant.id,
+            title: variant.title ?? null,
+            sku: variant.sku ?? null,
+            price: amount(variant.price),
+            availableQty: variant.inventoryQuantity ?? null,
+          })),
+          availableQty,
         });
       }
       after = nextCursor(page.products.pageInfo, after);

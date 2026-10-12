@@ -23,6 +23,7 @@ export type AiInvocationResult = {
   model: string;
   taskType: AiTaskType;
   durationMs: number;
+  invocationId: string | null;
   usage: { inputTokens: number | null; outputTokens: number | null; totalTokens: number | null };
 };
 export type AiModelVerification = {
@@ -54,9 +55,9 @@ type InvocationLog = {
   errorCode?: OpenAiRequestError["code"];
 };
 
-async function persistInvocation(log: InvocationLog): Promise<void> {
-  if (!isDatabaseConfigured()) return;
-  await getDatabaseClient().aiInvocation.create({
+async function persistInvocation(log: InvocationLog): Promise<string | null> {
+  if (!isDatabaseConfigured()) return null;
+  const invocation = await getDatabaseClient().aiInvocation.create({
     data: {
       taskType: log.taskType,
       model: log.model,
@@ -68,6 +69,7 @@ async function persistInvocation(log: InvocationLog): Promise<void> {
       errorCode: log.errorCode ?? null,
     },
   });
+  return invocation.id;
 }
 function toRequestError(error: unknown): OpenAiRequestError {
   const status =
@@ -99,7 +101,7 @@ export class OpenAiService {
           maxRetries: 0,
         }) as ResponsesClient)
       : null,
-    private readonly writeLog: (entry: InvocationLog) => Promise<void> = persistInvocation,
+    private readonly writeLog: (entry: InvocationLog) => Promise<string | null | void> = persistInvocation,
   ) {}
   isConfigured(): boolean {
     return this.client !== null;
@@ -150,14 +152,15 @@ export class OpenAiService {
         store: false,
       });
       const durationMs = Date.now() - startedAt;
+      let invocationId: string | null = null;
       try {
-        await this.writeLog({
+        invocationId = (await this.writeLog({
           taskType: input.taskType,
           model: selection.model,
           status: "COMPLETED",
           durationMs,
           usage: response.usage,
-        });
+        })) ?? null;
       } catch {
         // Never turn an already-completed paid request into a failure or issue it again.
       }
@@ -166,6 +169,7 @@ export class OpenAiService {
         model: selection.model,
         taskType: input.taskType,
         durationMs,
+        invocationId,
         usage: {
           inputTokens: response.usage?.input_tokens ?? null,
           outputTokens: response.usage?.output_tokens ?? null,

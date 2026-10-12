@@ -2,6 +2,7 @@ import { Source, IntegrationStatus, SyncEventStatus, AuditAction } from "@/gener
 import {
   ShopifyAdapter,
   ShopifyApiError,
+  ShopifyAuthenticationError,
   ShopifyConfigurationError,
   getShopifyConfig,
 } from "@/integrations/shopify/shopify.adapter";
@@ -25,11 +26,11 @@ export type ShopifySyncResult = {
   integration: ShopifyIntegrationStatus;
 };
 
-function safeErrorMessage(error: unknown, accessToken?: string): string {
+function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "Sincronizzazione Shopify non riuscita.";
-  const sanitized = accessToken ? message.replaceAll(accessToken, "[redacted]") : message;
   if (error instanceof ShopifyConfigurationError) return error.message;
-  if (error instanceof ShopifyApiError) return sanitized;
+  if (error instanceof ShopifyAuthenticationError) return error.message;
+  if (error instanceof ShopifyApiError) return message;
   return "Sincronizzazione Shopify non riuscita.";
 }
 
@@ -90,7 +91,7 @@ export async function checkShopifyConnection(): Promise<ShopifyIntegrationStatus
       data: { status: IntegrationStatus.CONNECTED, lastError: null },
     });
   } catch (error) {
-    const message = safeErrorMessage(error, config.accessToken);
+    const message = safeErrorMessage(error);
     await getDatabaseClient().integration.update({
       where: { id: integration.id },
       data: { status: IntegrationStatus.ERROR, lastError: message },
@@ -316,7 +317,7 @@ export async function syncShopify(): Promise<ShopifySyncResult> {
     });
     return { syncedAt, counts, integration: await getShopifyIntegrationStatus() };
   } catch (error) {
-    const message = safeErrorMessage(error, config.accessToken);
+    const message = safeErrorMessage(error);
     await db.syncEvent.update({
       where: { id: event.id },
       data: { status: SyncEventStatus.FAILED, error: message },

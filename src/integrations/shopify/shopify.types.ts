@@ -1,7 +1,9 @@
 export type ShopifyConfig = {
   storeDomain: string;
-  accessToken: string;
   apiVersion: string;
+  credentials:
+    | { kind: "client_credentials"; clientId: string; clientSecret: string }
+    | { kind: "legacy_access_token"; accessToken: string };
 };
 
 export type ShopifyMoney = {
@@ -28,6 +30,33 @@ export type ShopifyProduct = {
   status: "ACTIVE" | "ARCHIVED";
   category: string | null;
   imageUrl: string | null;
+  availableQty: number | null;
+};
+
+/**
+ * Deliberately read-only representation used by Alessandro's SEO analysis.
+ * It contains only catalog data, never customers or orders.
+ */
+export type ShopifyCatalogProduct = {
+  externalId: string;
+  title: string;
+  handle: string | null;
+  descriptionHtml: string | null;
+  seoTitle: string | null;
+  seoDescription: string | null;
+  imageUrl: string | null;
+  imageAltText: string | null;
+  images: Array<{ url: string; altText: string | null }>;
+  status: "ACTIVE" | "ARCHIVED" | "DRAFT" | "UNLISTED" | "UNKNOWN";
+  productType: string | null;
+  updatedAt: Date | null;
+  variants: Array<{
+    externalId: string;
+    title: string | null;
+    sku: string | null;
+    price: number | null;
+    availableQty: number | null;
+  }>;
   availableQty: number | null;
 };
 
