@@ -3,6 +3,8 @@ import type {
   ShopifyConfig,
   ShopifyCustomer,
   ShopifyCatalogProduct,
+  ShopifyDraftProduct,
+  ShopifyDraftProductResult,
   ShopifyOrder,
   ShopifyOrderItem,
   ShopifyProduct,
@@ -78,6 +80,23 @@ type CustomersPage = { customers: { nodes: RawCustomer[]; pageInfo: PageInfo } }
 type LineItemsPage = { order: { lineItems: { nodes: RawLineItem[]; pageInfo: PageInfo } } | null };
 type ProductVariantsPage = {
   product: { variants: { nodes: RawVariant[]; pageInfo: PageInfo } } | null;
+};
+
+type AccessScopesQuery = {
+  currentAppInstallation: { accessScopes: Array<{ handle: string }> } | null;
+};
+type ProductHandleQuery = { products: { nodes: Array<{ id: string }> } };
+type ProductCreateMutation = {
+  productCreate: {
+    product: { id: string; handle: string | null } | null;
+    userErrors: Array<{ field?: string[] | null; message: string }>;
+  };
+};
+type ProductVariantsBulkCreateMutation = {
+  productVariantsBulkCreate: {
+    productVariants: Array<{ id: string }>;
+    userErrors: Array<{ field?: string[] | null; message: string }>;
+  };
 };
 
 const ORDERS_QUERY = `
@@ -172,6 +191,40 @@ const SHOP_QUERY = `
   query ShopConnectionCheck { shop { name } }
 `;
 
+const ACCESS_SCOPES_QUERY = `
+  query CurrentAppAccessScopes {
+    currentAppInstallation { accessScopes { handle } }
+  }
+`;
+
+const PRODUCT_BY_HANDLE_QUERY = `
+  query ProductByHandle($query: String!) {
+    products(first: 2, query: $query) { nodes { id } }
+  }
+`;
+
+const PRODUCT_CREATE_MUTATION = `
+  mutation CreateDraftProduct($product: ProductCreateInput!, $media: [CreateMediaInput!]) {
+    productCreate(product: $product, media: $media) {
+      product { id handle }
+      userErrors { field message }
+    }
+  }
+`;
+
+const PRODUCT_VARIANTS_BULK_CREATE_MUTATION = `
+  mutation CreateDraftVariants($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+    productVariantsBulkCreate(
+      productId: $productId
+      variants: $variants
+      strategy: REMOVE_STANDALONE_VARIANT
+    ) {
+      productVariants { id }
+      userErrors { field message }
+    }
+  }
+`;
+
 export class ShopifyConfigurationError extends Error {
   constructor(message = "Shopify non è configurato.") {
     super(message);
@@ -187,6 +240,20 @@ export class ShopifyApiError extends Error {
   ) {
     super(message);
     this.name = "ShopifyApiError";
+  }
+}
+
+export class ShopifyWriteAccessError extends Error {
+  constructor(message = "L'app Shopify non dispone dello scope write_products.") {
+    super(message);
+    this.name = "ShopifyWriteAccessError";
+  }
+}
+
+export class ShopifyDuplicateProductError extends Error {
+  constructor() {
+    super("Esiste gia un prodotto Shopify con questo handle.");
+    this.name = "ShopifyDuplicateProductError";
   }
 }
 
@@ -408,6 +475,80 @@ export class ShopifyAdapter implements ExternalIntegrationAdapter {
   /** Reads the catalog only. It never includes customers, orders or mutations. */
   async fetchCatalog(): Promise<ShopifyCatalogProduct[]> {
     return this.fetchCatalogProducts();
+  }
+
+  /** Verifies the installed app's current access, rather than trusting configured scopes. */
+  async hasWriteProductsAccess(): Promise<boolean> {
+    const response = await this.graphql<AccessScopesQuery>(ACCESS_SCOPES_QUERY, {});
+    return Boolean(response.currentAppInstallation?.accessScopes.some((scope) => scope.handle === "write_products"));
+  }
+
+  /**
+   * Creates exactly one unpublished Shopify draft. Callers must have already
+   * persisted a human approval; this adapter never publishes a product.
+   */
+  async createDraftProduct(
+    input: ShopifyDraftProduct,
+    onProductCreated?: (product: Pick<ShopifyDraftProductResult, "productId" | "handle">) => Promise<void>,
+  ): Promise<ShopifyDraftProductResult> {
+    if (!(await this.hasWriteProductsAccess())) throw new ShopifyWriteAccessError();
+    const duplicate = await this.graphql<ProductHandleQuery>(PRODUCT_BY_HANDLE_QUERY, {
+      query: `handle:${input.handle}`,
+    });
+    if (duplicate.products.nodes.length > 0) throw new ShopifyDuplicateProductError();
+
+    const optionNames = [...new Set(input.variants.flatMap((variant) => variant.optionValues.map((value) => value.optionName)))];
+    const product = await this.graphql<ProductCreateMutation>(PRODUCT_CREATE_MUTATION, {
+      product: {
+        title: input.title,
+        handle: input.handle,
+        descriptionHtml: input.descriptionHtml,
+        ...(input.productType ? { productType: input.productType } : {}),
+        seo: { title: input.seoTitle, description: input.seoDescription },
+        status: "DRAFT",
+        productOptions: optionNames.map((name) => ({
+          name,
+          values: [...new Set(input.variants.flatMap((variant) => variant.optionValues.filter((value) => value.optionName === name).map((value) => value.value)))].map((name) => ({ name })),
+        })),
+      },
+      ...(input.images.length > 0
+        ? { media: input.images.map((image) => ({ originalSource: image.sourceUrl, mediaContentType: "IMAGE", ...(image.altText ? { alt: image.altText } : {}) })) }
+        : {}),
+    });
+    const createErrors = product.productCreate.userErrors;
+    const created = product.productCreate.product;
+    if (createErrors.length || !created?.id || !created.handle) {
+      throw new ShopifyApiError(createErrors.map((error) => error.message).join("; ") || "Shopify non ha creato la bozza prodotto.", 422);
+    }
+    // Persist the remote ID before any subsequent mutation. A later timeout must
+    // never be treated as safe to retry blindly.
+    await onProductCreated?.({ productId: created.id, handle: created.handle });
+
+    const variants = await this.graphql<ProductVariantsBulkCreateMutation>(
+      PRODUCT_VARIANTS_BULK_CREATE_MUTATION,
+      {
+        productId: created.id,
+        variants: input.variants.map((variant) => ({
+          price: variant.price,
+          ...(variant.sku ? { sku: variant.sku } : {}),
+          optionValues: variant.optionValues.map((value) => ({
+            optionName: value.optionName,
+            name: value.value,
+          })),
+        })),
+      },
+    );
+    if (variants.productVariantsBulkCreate.userErrors.length) {
+      throw new ShopifyApiError(
+        variants.productVariantsBulkCreate.userErrors.map((error) => error.message).join("; "),
+        422,
+      );
+    }
+    return {
+      productId: created.id,
+      handle: created.handle,
+      variantIds: variants.productVariantsBulkCreate.productVariants.map((variant) => variant.id),
+    };
   }
 
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {

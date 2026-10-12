@@ -9,6 +9,7 @@ import {
 } from "@/components/commerce/commerce-tables";
 import { OpenAiTest } from "@/components/integrations/openai-test";
 import { ShopifySettings } from "@/components/settings/shopify-settings";
+import { ShopifyProductCreator } from "@/components/commerce/shopify-product-creator";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getNavigationItem, navigationItems } from "@/lib/navigation";
@@ -21,6 +22,10 @@ import {
 import { getLorenzoWorkspace } from "@/server/services/lorenzo-service";
 import { getTeamAiDashboardData } from "@/server/services/team-ai-service";
 import { getShopifyIntegrationStatus } from "@/server/services/shopify-sync-service";
+import {
+  listShopifyProductProposals,
+  readStoredProductProposal,
+} from "@/server/services/shopify-product-creator-service";
 
 function CommercePage({
   title,
@@ -71,7 +76,25 @@ export default async function SectionPlaceholder({
     );
   }
   if (section === "products") {
-    const products = await getProductsForPage().catch(() => []);
+    const [products, productProposals] = await Promise.all([
+      getProductsForPage().catch(() => []),
+      listShopifyProductProposals().catch(() => []),
+    ]);
+    const creatorProposals = productProposals.flatMap((task) => {
+      const stored = readStoredProductProposal(task.description);
+      return stored ? [{
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        updatedAt: task.updatedAt,
+        result: task.result,
+        product: {
+          title: stored.product.title,
+          handle: stored.product.handle,
+          variants: stored.product.variants.map((variant) => ({ title: variant.title, price: variant.price })),
+        },
+      }] : [];
+    });
     return (
       <CommercePage
         title="Prodotti"
@@ -79,6 +102,7 @@ export default async function SectionPlaceholder({
         hasData={products.length > 0}
       >
         <ProductsTable products={products} />
+        <ShopifyProductCreator initialProposals={creatorProposals} />
       </CommercePage>
     );
   }

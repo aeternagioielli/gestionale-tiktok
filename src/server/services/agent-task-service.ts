@@ -225,3 +225,46 @@ export async function claimQueuedAgentTask(input: {
   });
   return task ? mapTask(task) : null;
 }
+
+/**
+ * Atomically records a human approval and acquires the task for one external
+ * execution. It prevents two browser clicks from creating two Shopify products.
+ */
+export async function approveAndClaimAgentTask(input: {
+  taskId: string;
+  actor?: AgentId;
+}): Promise<AgentTaskView | null> {
+  const taskId = taskIdSchema.parse(input.taskId);
+  const task = await getDatabaseClient().$transaction(async (tx) => {
+    const claimed = await tx.agentTask.updateMany({
+      where: {
+        id: taskId,
+        status: PrismaAgentTaskStatus.AWAITING_APPROVAL,
+        requiresApproval: true,
+      },
+      data: { status: PrismaAgentTaskStatus.RUNNING },
+    });
+    if (claimed.count !== 1) return null;
+    await tx.agentTaskAuditEvent.createMany({
+      data: [
+        {
+          taskId,
+          eventType: AgentTaskAuditEventType.APPROVED,
+          fromStatus: PrismaAgentTaskStatus.AWAITING_APPROVAL,
+          toStatus: PrismaAgentTaskStatus.RUNNING,
+          actor: input.actor,
+        },
+        {
+          taskId,
+          eventType: AgentTaskAuditEventType.STATUS_CHANGED,
+          fromStatus: PrismaAgentTaskStatus.AWAITING_APPROVAL,
+          toStatus: PrismaAgentTaskStatus.RUNNING,
+          actor: input.actor,
+          metadata: { reason: "APPROVED_EXTERNAL_EXECUTION_CLAIMED" },
+        },
+      ],
+    });
+    return tx.agentTask.findUnique({ where: { id: taskId } });
+  });
+  return task ? mapTask(task) : null;
+}

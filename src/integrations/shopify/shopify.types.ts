@@ -60,6 +60,33 @@ export type ShopifyCatalogProduct = {
   availableQty: number | null;
 };
 
+/**
+ * Verified product facts supplied by an operator. These are the only facts that
+ * can be sent to Shopify when an approved draft is created.
+ */
+export type ShopifyDraftProduct = {
+  title: string;
+  handle: string;
+  descriptionHtml: string;
+  seoTitle: string;
+  seoDescription: string;
+  productType: string | null;
+  materials: string[];
+  variants: Array<{
+    title: string;
+    sku: string | null;
+    price: string;
+    optionValues: Array<{ optionName: string; value: string }>;
+  }>;
+  images: Array<{ sourceUrl: string; altText: string | null }>;
+};
+
+export type ShopifyDraftProductResult = {
+  productId: string;
+  handle: string;
+  variantIds: string[];
+};
+
 export type ShopifyOrderItem = {
   externalId: string;
   productExternalId: string | null;

@@ -5,6 +5,8 @@ import { POST as completeTask } from "@/app/api/tasks/[id]/complete/route";
 import { GET as getGoals } from "@/app/api/goals/route";
 import { GET as getShopify, POST as syncShopify } from "@/app/api/integrations/shopify/route";
 import { POST as runShopifySeoAnalysis } from "@/app/api/agents/shopify-seo-analysis/route";
+import { POST as createShopifyProductProposal } from "@/app/api/agents/shopify-product-proposals/route";
+import { POST as createApprovedShopifyDraft } from "@/app/api/agents/shopify-product-proposals/[id]/create/route";
 
 describe("internal API without a configured database", () => {
   it("returns an explicit empty overview", async () => {
@@ -53,6 +55,24 @@ describe("internal API without a configured database", () => {
         method: "POST",
         body: JSON.stringify({ retryFailed: "yes" }),
       }),
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects invalid product proposal data before an AI request", async () => {
+    const response = await createShopifyProductProposal(
+      new Request("http://localhost/api/agents/shopify-product-proposals", {
+        method: "POST",
+        body: JSON.stringify({ productName: "" }),
+      }),
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects an invalid approval task ID before any Shopify write", async () => {
+    const response = await createApprovedShopifyDraft(
+      new Request("http://localhost/api/agents/shopify-product-proposals/not-a-cuid/create", { method: "POST" }),
+      { params: Promise.resolve({ id: "not-a-cuid" }) },
     );
     expect(response.status).toBe(400);
   });

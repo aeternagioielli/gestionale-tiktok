@@ -204,4 +204,27 @@ describe("ShopifyAdapter", () => {
     expect(request.query).not.toContain("customers(first");
     expect(request.query).not.toContain("mutation");
   });
+
+  it("creates an explicitly requested DRAFT with verified variants and never publishes it", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response({ data: { currentAppInstallation: { accessScopes: [{ handle: "write_products" }] } } }))
+      .mockResolvedValueOnce(response({ data: { products: { nodes: [] } } }))
+      .mockResolvedValueOnce(response({ data: { productCreate: { product: { id: "gid://shopify/Product/9", handle: "aeterna-ring" }, userErrors: [] } } }))
+      .mockResolvedValueOnce(response({ data: { productVariantsBulkCreate: { productVariants: [{ id: "gid://shopify/ProductVariant/9" }], userErrors: [] } } }));
+    const adapter = new ShopifyAdapter(
+      { storeDomain: "store.myshopify.com", credentials: { kind: "legacy_access_token", accessToken: "token" }, apiVersion: "2026-10" },
+      fetchMock,
+    );
+    const result = await adapter.createDraftProduct({
+      title: "AETERNA Ring", handle: "aeterna-ring", descriptionHtml: "<p>Verified silver ring.</p>", seoTitle: "AETERNA Ring", seoDescription: "A verified silver ring.", productType: "Jewelry", materials: ["Sterling silver"],
+      variants: [{ title: "Small", sku: "RING-S", price: "89.00", optionValues: [{ optionName: "Size", value: "Small" }] }],
+      images: [],
+    });
+    expect(result).toMatchObject({ productId: "gid://shopify/Product/9", variantIds: ["gid://shopify/ProductVariant/9"] });
+    const requests = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> });
+    const create = requests.find((request) => request.query.includes("productCreate"));
+    expect(create?.variables.product).toMatchObject({ status: "DRAFT", handle: "aeterna-ring" });
+    expect(requests.some((request) => request.query.includes("publishablePublish"))).toBe(false);
+  });
 });
