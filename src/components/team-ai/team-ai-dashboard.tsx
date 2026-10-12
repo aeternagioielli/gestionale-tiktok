@@ -15,6 +15,10 @@ function formatDate(value: string): string {
 function agentStatus(agent: TeamAiAgentCard) {
   if (agent.status === "RUNNING")
     return { label: "In esecuzione", tone: "info" as const, state: "working" as const };
+  if (agent.status === "QUEUED")
+    return { label: "In coda", tone: "muted" as const, state: "idle" as const };
+  if (agent.status === "AWAITING_APPROVAL")
+    return { label: "Approvazione richiesta", tone: "warning" as const, state: "awaiting" as const };
   if (agent.status === "ERROR")
     return { label: "Errore", tone: "error" as const, state: "failed" as const };
   if (agent.status === "AVAILABLE")
@@ -38,12 +42,17 @@ function AgentCard({ agent, ceo = false }: { agent: TeamAiAgentCard; ceo?: boole
       {agent.status === "RUNNING" && agent.currentActivity && (
         <p className={styles.currentActivity}>{agent.currentActivity}</p>
       )}
+      {agent.status !== "RUNNING" && agent.assignedTask && (
+        <p className={styles.currentActivity}>Attivita assegnata: {agent.assignedTask.title}</p>
+      )}
       {agent.status !== "RUNNING" && <p className={styles.agentNote}>{agent.statusReason}</p>}
     </article>
   );
 }
 
 function activityStatus(status: string) {
+  if (status === "QUEUED") return { label: "In coda", tone: "muted" as const };
+  if (status === "AWAITING_APPROVAL") return { label: "Da approvare", tone: "warning" as const };
   if (status === "SUCCESS") return { label: "Completata", tone: "completed" as const };
   if (status === "ERROR" || status === "FAILED") return { label: "Errore", tone: "error" as const };
   if (status === "RUNNING") return { label: "In corso", tone: "info" as const };
@@ -114,8 +123,22 @@ export function TeamAiDashboard({
           </div>
           <Sparkles size={18} aria-hidden="true" />
         </div>
-        {dashboard.recentActivities.length ? (
+        {dashboard.recentOperationalTasks.length || dashboard.recentActivities.length ? (
           <ol className={styles.activityList}>
+            {dashboard.recentOperationalTasks.map((activity) => {
+              const status = activityStatus(activity.status);
+              return (
+                <li key={activity.id}>
+                  <span className={styles.activityMarker} aria-hidden="true" />
+                  <div>
+                    <strong>{activity.title}</strong>
+                    <span>{activity.agent} · {activity.source === "AUTOMATIC" ? "Proposta di Lorenzo" : "Registro operativo"}</span>
+                  </div>
+                  <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+                  <time dateTime={activity.updatedAt}>{formatDate(activity.updatedAt)}</time>
+                </li>
+              );
+            })}
             {dashboard.recentActivities.map((activity) => {
               const status = activityStatus(activity.status);
               return (

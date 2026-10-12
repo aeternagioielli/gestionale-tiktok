@@ -30,4 +30,14 @@ describe("TEAM AI dashboard", () => {
     });
     expect(agents.some((agent) => agent.status === "RUNNING")).toBe(false);
   });
+
+  it("shows only a persisted assignment and its actual queue state", () => {
+    const agents = buildTeamAiAgentCards({
+      openAiConfigured: true,
+      databaseAvailable: true,
+      complexModel: "gpt-6-astra",
+      assignedTasks: [{ id: "task-1", agent: "MARCO", title: "Verificare dati Meta", status: "QUEUED", updatedAt: new Date("2026-10-12T10:00:00.000Z") }],
+    });
+    expect(agents.find((agent) => agent.id === "marco")).toMatchObject({ status: "QUEUED", assignedTask: { title: "Verificare dati Meta" } });
+  });
 });

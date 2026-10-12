@@ -49,6 +49,41 @@ enum TaskStatus {
   BLOCKED
 }
 
+enum AgentId {
+  LORENZO
+  MARCO
+  GIULIA
+  ALESSANDRO
+  MATTEO
+  FRANCESCA
+}
+
+enum AgentTaskSource {
+  MANUAL
+  AUTOMATIC
+  EVENT
+}
+
+enum AgentTaskStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  AWAITING_APPROVAL
+  CANCELLED
+}
+
+enum AgentTaskAuditEventType {
+  CREATED
+  ASSIGNED
+  STATUS_CHANGED
+  APPROVAL_REQUESTED
+  APPROVED
+  REJECTED
+  RESULT_RECORDED
+  DUPLICATE_SKIPPED
+}
+
 enum TaskCategory {
   DATA
   MARKETING
@@ -394,11 +429,55 @@ model AiInvocation {
   outputTokens Int?
   totalTokens  Int?
   errorCode    String?  @db.VarChar(64)
+  agentTasks   AgentTask[]
   createdAt    DateTime @default(now())
 
   // Prompts, responses, credentials and user identifiers are intentionally not retained.
   @@index([createdAt])
   @@index([taskType, status])
+}
+
+model AgentTask {
+  id                String          @id @default(cuid())
+  agent             AgentId
+  title             String
+  description       String?
+  source            AgentTaskSource
+  priority          Int             @default(50)
+  status            AgentTaskStatus @default(QUEUED)
+  requiresApproval  Boolean         @default(false)
+  approvalReason    String?
+  result            String?
+  dedupeKey         String?         @unique @db.VarChar(160)
+  executionId       String?         @db.VarChar(128)
+  aiInvocationId    String?
+  parentTaskId      String?
+  parentTask        AgentTask?      @relation("AgentTaskHierarchy", fields: [parentTaskId], references: [id], onDelete: SetNull)
+  childTasks        AgentTask[]     @relation("AgentTaskHierarchy")
+  aiInvocation      AiInvocation?   @relation(fields: [aiInvocationId], references: [id], onDelete: SetNull)
+  auditEvents       AgentTaskAuditEvent[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([agent, status, priority])
+  @@index([status, updatedAt])
+  @@index([parentTaskId])
+  @@index([aiInvocationId])
+}
+
+model AgentTaskAuditEvent {
+  id         String                  @id @default(cuid())
+  taskId     String
+  eventType  AgentTaskAuditEventType
+  fromStatus AgentTaskStatus?
+  toStatus   AgentTaskStatus?
+  actor      AgentId?
+  metadata   Json?
+  task       AgentTask               @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdAt  DateTime                @default(now())
+
+  @@index([taskId, createdAt])
+  @@index([createdAt])
 }
 
 model Integration {
