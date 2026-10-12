@@ -232,4 +232,30 @@ describe("ShopifyAdapter", () => {
     ]);
     expect(requests.some((request) => request.query.includes("publishablePublish"))).toBe(false);
   });
+
+  it("omits an unverified price instead of sending a made-up commercial value", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response({ data: { currentAppInstallation: { accessScopes: [{ handle: "write_products" }] } } }))
+      .mockResolvedValueOnce(response({ data: { products: { nodes: [] } } }))
+      .mockResolvedValueOnce(response({ data: { productVariants: { nodes: [] } } }))
+      .mockResolvedValueOnce(response({ data: { productCreate: { product: { id: "gid://shopify/Product/10", handle: "collana-orbis" }, userErrors: [] } } }))
+      .mockResolvedValueOnce(response({ data: { productVariantsBulkCreate: { productVariants: [{ id: "gid://shopify/ProductVariant/10", price: "0.00" }], userErrors: [] } } }));
+    const adapter = new ShopifyAdapter(
+      { storeDomain: "store.myshopify.com", credentials: { kind: "legacy_access_token", accessToken: "token" }, apiVersion: "2026-10" },
+      fetchMock,
+    );
+    await adapter.createDraftProduct({
+      title: "Collana Orbis", handle: "collana-orbis", descriptionHtml: "Collana Orbis", seoTitle: "Collana Orbis", seoDescription: null, productType: "Collana", materials: [],
+      variants: [{ title: "Default", sku: "COL-001", price: null, optionValues: [{ optionName: "Title", value: "Default" }] }],
+      images: [],
+    });
+    const requests = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> });
+    const variants = requests.find((request) => request.query.includes("productVariantsBulkCreate"));
+    expect(variants?.variables.variants).toEqual([
+      expect.objectContaining({ sku: "COL-001" }),
+    ]);
+    expect((variants?.variables.variants as Array<Record<string, unknown>>)[0]).not.toHaveProperty("price");
+    expect(requests.some((request) => request.query.includes("publishablePublish"))).toBe(false);
+  });
 });

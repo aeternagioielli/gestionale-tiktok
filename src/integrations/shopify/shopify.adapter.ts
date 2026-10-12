@@ -86,7 +86,7 @@ type AccessScopesQuery = {
   currentAppInstallation: { accessScopes: Array<{ handle: string }> } | null;
 };
 type ProductHandleQuery = { products: { nodes: Array<{ id: string }> } };
-type ProductVariantSkuQuery = { productVariants: { nodes: Array<{ id: string }> } };
+type ProductVariantSkuQuery = { productVariants: { nodes: Array<{ id: string; product: { id: string } | null }> } };
 type ProductCreateMutation = {
   productCreate: {
     product: { id: string; handle: string | null } | null;
@@ -95,7 +95,7 @@ type ProductCreateMutation = {
 };
 type ProductVariantsBulkCreateMutation = {
   productVariantsBulkCreate: {
-    productVariants: Array<{ id: string }>;
+    productVariants: Array<{ id: string; price: string | null }>;
     userErrors: Array<{ field?: string[] | null; message: string }>;
   };
 };
@@ -206,7 +206,7 @@ const PRODUCT_BY_HANDLE_QUERY = `
 
 const PRODUCT_VARIANT_BY_SKU_QUERY = `
   query ProductVariantBySku($query: String!) {
-    productVariants(first: 1, query: $query) { nodes { id } }
+    productVariants(first: 1, query: $query) { nodes { id product { id } } }
   }
 `;
 
@@ -226,7 +226,7 @@ const PRODUCT_VARIANTS_BULK_CREATE_MUTATION = `
       variants: $variants
       strategy: REMOVE_STANDALONE_VARIANT
     ) {
-      productVariants { id }
+      productVariants { id price }
       userErrors { field message }
     }
   }
@@ -258,14 +258,14 @@ export class ShopifyWriteAccessError extends Error {
 }
 
 export class ShopifyDuplicateProductError extends Error {
-  constructor() {
+  constructor(public readonly productId?: string) {
     super("Esiste gia un prodotto Shopify con questo handle.");
     this.name = "ShopifyDuplicateProductError";
   }
 }
 
 export class ShopifyDuplicateSkuError extends Error {
-  constructor() {
+  constructor(public readonly productId?: string) {
     super("Esiste gia una variante Shopify con uno degli SKU indicati.");
     this.name = "ShopifyDuplicateSkuError";
   }
@@ -509,7 +509,7 @@ export class ShopifyAdapter implements ExternalIntegrationAdapter {
     const duplicate = await this.graphql<ProductHandleQuery>(PRODUCT_BY_HANDLE_QUERY, {
       query: `handle:${input.handle}`,
     });
-    if (duplicate.products.nodes.length > 0) throw new ShopifyDuplicateProductError();
+    if (duplicate.products.nodes.length > 0) throw new ShopifyDuplicateProductError(duplicate.products.nodes[0]?.id);
 
     const skus = input.variants.map((variant) => variant.sku).filter((sku): sku is string => Boolean(sku));
     if (new Set(skus).size !== skus.length) throw new ShopifyDuplicateSkuError();
@@ -517,7 +517,11 @@ export class ShopifyAdapter implements ExternalIntegrationAdapter {
       const variant = await this.graphql<ProductVariantSkuQuery>(PRODUCT_VARIANT_BY_SKU_QUERY, {
         query: `sku:${sku}`,
       });
-      if (variant.productVariants.nodes.length > 0) throw new ShopifyDuplicateSkuError();
+      if (variant.productVariants.nodes.length > 0) {
+        throw new ShopifyDuplicateSkuError(
+          variant.productVariants.nodes[0]?.product?.id ?? variant.productVariants.nodes[0]?.id,
+        );
+      }
     }
 
     const optionNames = [...new Set(input.variants.flatMap((variant) => variant.optionValues.map((value) => value.optionName)))];
@@ -527,7 +531,9 @@ export class ShopifyAdapter implements ExternalIntegrationAdapter {
         handle: input.handle,
         descriptionHtml: input.descriptionHtml,
         ...(input.productType ? { productType: input.productType } : {}),
-        seo: { title: input.seoTitle, description: input.seoDescription },
+        ...(input.seoTitle || input.seoDescription
+          ? { seo: { ...(input.seoTitle ? { title: input.seoTitle } : {}), ...(input.seoDescription ? { description: input.seoDescription } : {}) } }
+          : {}),
         status: "DRAFT",
         productOptions: optionNames.map((name) => ({
           name,
@@ -552,7 +558,7 @@ export class ShopifyAdapter implements ExternalIntegrationAdapter {
       {
         productId: created.id,
         variants: input.variants.map((variant) => ({
-          price: variant.price,
+          ...(variant.price ? { price: variant.price } : {}),
           ...(variant.sku ? { sku: variant.sku } : {}),
           optionValues: variant.optionValues.map((value) => ({
             optionName: value.optionName,

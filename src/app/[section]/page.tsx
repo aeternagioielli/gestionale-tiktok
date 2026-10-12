@@ -10,6 +10,7 @@ import {
 import { OpenAiTest } from "@/components/integrations/openai-test";
 import { ShopifySettings } from "@/components/settings/shopify-settings";
 import { ShopifyProductCreator } from "@/components/commerce/shopify-product-creator";
+import { ShopifyCatalogImporter } from "@/components/commerce/shopify-catalog-importer";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getNavigationItem, navigationItems } from "@/lib/navigation";
@@ -26,6 +27,7 @@ import {
   listShopifyProductProposals,
   readStoredProductProposal,
 } from "@/server/services/shopify-product-creator-service";
+import { getLatestAeternaCatalogImport } from "@/server/services/shopify-catalog-import-service";
 
 function CommercePage({
   title,
@@ -76,9 +78,10 @@ export default async function SectionPlaceholder({
     );
   }
   if (section === "products") {
-    const [products, productProposals] = await Promise.all([
+    const [products, productProposals, catalogImport] = await Promise.all([
       getProductsForPage().catch(() => []),
       listShopifyProductProposals().catch(() => []),
+      getLatestAeternaCatalogImport().catch(() => null),
     ]);
     const creatorProposals = productProposals.flatMap((task) => {
       const stored = readStoredProductProposal(task.description);
@@ -113,6 +116,7 @@ export default async function SectionPlaceholder({
       >
         <ProductsTable products={products} />
         <ShopifyProductCreator initialProposals={creatorProposals} />
+        <ShopifyCatalogImporter initialImport={catalogImport} />
       </CommercePage>
     );
   }

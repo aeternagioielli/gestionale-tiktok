@@ -68,14 +68,15 @@ export type ShopifyDraftProduct = {
   title: string;
   handle: string;
   descriptionHtml: string;
-  seoTitle: string;
-  seoDescription: string;
+  seoTitle: string | null;
+  seoDescription: string | null;
   productType: string | null;
   materials: string[];
   variants: Array<{
     title: string;
     sku: string | null;
-    price: string;
+    /** Omit the field when no commercial price has been verified. */
+    price: string | null;
     optionValues: Array<{ optionName: string; value: string }>;
   }>;
   images: Array<{ sourceUrl: string; altText: string | null }>;

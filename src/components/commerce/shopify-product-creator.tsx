@@ -13,29 +13,10 @@ import {
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import styles from "@/components/commerce/shopify-product-creator.module.css";
-
-const CATEGORIES = ["Collana", "Bracciale", "Anello", "Orecchini"] as const;
-
-export const AETERNA_PRODUCT_CATALOG = [
-  ["COL-001", "Collana Orbis", "Collana"],
-  ["COL-002", "Collana Venere Argento", "Collana"],
-  ["COL-003", "Collana Venere Oro", "Collana"],
-  ["COL-004", "Collana Cora", "Collana"],
-  ["COL-005", "Collana Afrodite", "Collana"],
-  ["BRA-001", "Bracciale Cora Argento", "Bracciale"],
-  ["BRA-002", "Bracciale Aqua", "Bracciale"],
-  ["BRA-003", "Bracciale Cora Oro", "Bracciale"],
-  ["BRA-004", "Bracciale Trama", "Bracciale"],
-  ["BRA-005", "Bracciale Venere Oro", "Bracciale"],
-  ["BRA-006", "Bracciale Venere Argento", "Bracciale"],
-  ["ANE-001", "Anello Orbis", "Anello"],
-  ["ANE-002", "Anello Cora Argento", "Anello"],
-  ["ANE-003", "Anello Trama Oro", "Anello"],
-  ["ANE-004", "Anello Trama Argento", "Anello"],
-  ["ANE-005", "Anello Cora Oro", "Anello"],
-  ["ORE-001", "Orecchini Trama", "Orecchini"],
-  ["ORE-002", "Orecchini Orbis", "Orecchini"],
-] as const satisfies ReadonlyArray<readonly [string, string, (typeof CATEGORIES)[number]]>;
+import {
+  AETERNA_PRODUCT_CATALOG,
+  AETERNA_PRODUCT_CATEGORIES,
+} from "@/lib/aeterna-product-catalog";
 
 type ProductVariant = { id: string; name: string; sku: string; price: string };
 type ProposalProduct = {
@@ -61,7 +42,7 @@ type FormState = {
   catalogSku: string;
   productName: string;
   sku: string;
-  category: (typeof CATEGORIES)[number];
+  category: (typeof AETERNA_PRODUCT_CATEGORIES)[number];
   price: string;
   materials: string;
   factualDescription: string;
@@ -129,12 +110,12 @@ export function ShopifyProductCreator({ initialProposals }: { initialProposals: 
   }
 
   function chooseCatalog(sku: string) {
-    const entry = AETERNA_PRODUCT_CATALOG.find(([catalogSku]) => catalogSku === sku);
+    const entry = AETERNA_PRODUCT_CATALOG.find((entry) => entry.sku === sku);
     if (!entry) {
       patchForm({ catalogSku: "" });
       return;
     }
-    const [, productName, category] = entry;
+    const { name: productName, category } = entry;
     setForm((current) => ({
       ...current,
       catalogSku: sku,
@@ -307,9 +288,9 @@ export function ShopifyProductCreator({ initialProposals }: { initialProposals: 
                 Scegli un prodotto AETERNA
                 <select value={form.catalogSku} onChange={(event) => chooseCatalog(event.target.value)}>
                   <option value="">Prodotto non presente nel catalogo</option>
-                  {AETERNA_PRODUCT_CATALOG.map(([sku, name]) => (
-                    <option key={sku} value={sku}>
-                      {name} · {sku}
+                  {AETERNA_PRODUCT_CATALOG.map((entry) => (
+                    <option key={entry.sku} value={entry.sku}>
+                      {entry.name} · {entry.sku}
                     </option>
                   ))}
                 </select>
@@ -323,7 +304,7 @@ export function ShopifyProductCreator({ initialProposals }: { initialProposals: 
                     patchForm({ category: event.target.value as FormState["category"] })
                   }
                 >
-                  {CATEGORIES.map((category) => (
+                  {AETERNA_PRODUCT_CATEGORIES.map((category) => (
                     <option key={category}>{category}</option>
                   ))}
                 </select>
