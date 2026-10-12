@@ -1,0 +1,163 @@
+.avatar {
+  position: relative;
+  display: inline-grid;
+  width: 68px;
+  height: 76px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 19px;
+  background: linear-gradient(145deg, var(--surface-3), var(--surface-1));
+}
+.avatar[data-size="large"] {
+  width: 96px;
+  height: 108px;
+  border-radius: 24px;
+  border-color: #635741;
+  background: linear-gradient(145deg, #343128, var(--surface-1));
+}
+.avatar > svg:first-child {
+  width: 100%;
+  height: 100%;
+  padding: 3px;
+}
+.shell {
+  fill: #bcbab3;
+  stroke: #77766f;
+  stroke-width: 1.5;
+}
+.body {
+  fill: #555852;
+  stroke: #77766f;
+  stroke-width: 1.4;
+}
+.visor {
+  fill: #232622;
+}
+.eye {
+  fill: #e6e0cf;
+}
+.smile {
+  fill: none;
+  stroke: #e6e0cf;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+.line {
+  fill: none;
+  stroke: #aaa9a1;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.accent {
+  fill: none;
+  stroke: var(--gold-bright);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.filledAccent {
+  fill: var(--gold-bright);
+  stroke: #bda377;
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+.beret {
+  fill: #666962;
+  stroke: #95978b;
+  stroke-width: 1.5;
+}
+.avatar[data-state="working"]::after {
+  position: absolute;
+  content: "";
+  inset: -1px;
+  border: 1px solid var(--gold-bright);
+  border-radius: inherit;
+  animation: work 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+.avatar[data-state="thinking"] {
+  animation: think 2s ease-in-out infinite;
+}
+.indicator {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 22px;
+  height: 22px;
+  padding: 3px;
+  border: 1px solid #635741;
+  border-radius: 7px;
+  background: var(--surface-1);
+  fill: none;
+  stroke: var(--gold-bright);
+  stroke-width: 1.5;
+}
+.avatar[data-state="failed"] .indicator {
+  stroke: var(--red);
+  border-color: #634447;
+}
+.avatar[data-state="completed"] .indicator {
+  animation: complete 0.3s ease-out both;
+}
+.dots {
+  position: absolute;
+  right: -9px;
+  bottom: -5px;
+  display: flex;
+  gap: 3px;
+  padding: 6px;
+  border-radius: 6px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+}
+.dots i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--gold-bright);
+  animation: dot 1.4s infinite;
+}
+.dots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.dots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes work {
+  0%,
+  100% {
+    clip-path: inset(0 60% 90% 0);
+  }
+  50% {
+    clip-path: inset(90% 0 0 60%);
+  }
+}
+@keyframes think {
+  50% {
+    box-shadow: 0 0 0 5px rgba(196, 165, 112, 0.08);
+  }
+}
+@keyframes dot {
+  50% {
+    opacity: 0.25;
+  }
+}
+@keyframes complete {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .avatar,
+  .avatar::after,
+  .indicator,
+  .dots i {
+    animation: none !important;
+  }
+}
