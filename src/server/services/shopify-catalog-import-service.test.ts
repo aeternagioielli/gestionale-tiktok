@@ -5,6 +5,7 @@ import {
   authorizeAeternaCatalogImport,
   prepareAeternaCatalogImport,
   processNextAeternaCatalogItem,
+  reconcileNextAeternaCatalogItem,
   type CatalogImportDependencies,
 } from "@/server/services/shopify-catalog-import-service";
 import type { AgentTaskView } from "@/server/services/agent-task-service";
@@ -58,7 +59,7 @@ function dependencies(): CatalogImportDependencies & { tasks: Map<string, AgentT
     getTask: async (id) => tasks.get(id) ?? null,
     listChildren: async (id) => [...tasks.values()].filter((entry) => entry.parentTaskId === id).sort((a, b) => a.priority - b.priority),
     writeAudit: audit,
-    createDraftProduct: vi.fn(async (input, onProductCreated) => {
+    createCatalogDraftProduct: vi.fn(async (input, onProductCreated) => {
       const variant = input.variants[0];
       expect(variant?.price).toBeNull();
       await onProductCreated?.({ productId: "gid://shopify/Product/101", handle: input.handle });
@@ -67,7 +68,21 @@ function dependencies(): CatalogImportDependencies & { tasks: Map<string, AgentT
         handle: input.handle,
         variantIds: ["gid://shopify/ProductVariant/101"],
       };
-    }) as CatalogImportDependencies["createDraftProduct"],
+    }) as CatalogImportDependencies["createCatalogDraftProduct"],
+    verifyDraftProduct: vi.fn(async (productId: string) => ({
+      productId,
+      handle: "collana-orbis",
+      title: "Collana Orbis",
+      status: "DRAFT",
+      variants: [{ id: "gid://shopify/ProductVariant/88", title: "Default", sku: "COL-001" }],
+    })) as CatalogImportDependencies["verifyDraftProduct"],
+    retryFailedTask: vi.fn(async ({ taskId }: { taskId: string }) => {
+      const current = tasks.get(taskId);
+      if (!current || current.status !== "FAILED") return null;
+      const updated = { ...current, status: "QUEUED" as const };
+      tasks.set(taskId, updated);
+      return updated;
+    }) as CatalogImportDependencies["retryFailedTask"],
     isDatabaseConfigured: () => true,
   };
 }
@@ -98,7 +113,7 @@ describe("AETERNA catalog import", () => {
     expect(afterOne.totals.queued).toBe(17);
     expect(afterOne.items[0]?.message).toMatch(/^DRAFT_CREATED:/);
     expect(afterOne.items[0]?.message).toContain("PRICE_UNDEFINED");
-    expect(deps.createDraftProduct).toHaveBeenCalledTimes(1);
+    expect(deps.createCatalogDraftProduct).toHaveBeenCalledTimes(1);
     expect(deps.audit).toHaveBeenCalledWith(expect.objectContaining({ event: "STEP_COMPLETED" }));
   });
 
@@ -126,14 +141,14 @@ describe("AETERNA catalog import", () => {
     expect(resumed.totals.failed).toBe(1);
     expect(resumed.totals.queued).toBe(17);
     expect(resumed.items[0]?.message).toContain("non e stato ritentato automaticamente");
-    expect(deps.createDraftProduct).not.toHaveBeenCalled();
+    expect(deps.createCatalogDraftProduct).not.toHaveBeenCalled();
   });
 
   it("records an existing remote product without a second write", async () => {
     const deps = dependencies();
-    deps.createDraftProduct = vi.fn(async () => {
+    deps.createCatalogDraftProduct = vi.fn(async () => {
       throw new ShopifyDuplicateProductError("gid://shopify/Product/77");
-    }) as CatalogImportDependencies["createDraftProduct"];
+    }) as CatalogImportDependencies["createCatalogDraftProduct"];
     const batch = await prepareAeternaCatalogImport(deps);
     await authorizeAeternaCatalogImport(batch.batch.id, deps);
     const result = await processNextAeternaCatalogItem(batch.batch.id, deps);
@@ -143,15 +158,81 @@ describe("AETERNA catalog import", () => {
 
   it("marks an uncertain post-write result as failed and never retries it automatically", async () => {
     const deps = dependencies();
-    deps.createDraftProduct = vi.fn(async (_input, onProductCreated) => {
+    deps.createCatalogDraftProduct = vi.fn(async (_input, onProductCreated) => {
       await onProductCreated?.({ productId: "gid://shopify/Product/88", handle: "collana-orbis" });
       throw new Error("timeout");
-    }) as CatalogImportDependencies["createDraftProduct"];
+    }) as CatalogImportDependencies["createCatalogDraftProduct"];
     const batch = await prepareAeternaCatalogImport(deps);
     await authorizeAeternaCatalogImport(batch.batch.id, deps);
     const result = await processNextAeternaCatalogItem(batch.batch.id, deps);
     expect(result.totals.failed).toBe(1);
     expect(result.items[0]?.message).toContain("WRITE_OUTCOME_UNKNOWN");
-    expect(deps.createDraftProduct).toHaveBeenCalledTimes(1);
+    expect(deps.createCatalogDraftProduct).toHaveBeenCalledTimes(1);
+  });
+
+  async function uncertainImport(deps: ReturnType<typeof dependencies>) {
+    deps.createCatalogDraftProduct = vi.fn(async (_input, onProductCreated) => {
+      await onProductCreated?.({ productId: "gid://shopify/Product/88", handle: "collana-orbis" });
+      throw new Error("variant failure");
+    }) as CatalogImportDependencies["createCatalogDraftProduct"];
+    const batch = await prepareAeternaCatalogImport(deps);
+    await authorizeAeternaCatalogImport(batch.batch.id, deps);
+    await processNextAeternaCatalogItem(batch.batch.id, deps);
+    return batch;
+  }
+
+  it("reconciles a created DRAFT with matching identity and SKU without any mutation", async () => {
+    const deps = dependencies();
+    const batch = await uncertainImport(deps);
+    const result = await reconcileNextAeternaCatalogItem(batch.batch.id, deps);
+    expect(result.totals.draftCreated).toBe(1);
+    expect(result.totals.failed).toBe(0);
+    expect(deps.verifyDraftProduct).toHaveBeenCalledWith("gid://shopify/Product/88");
+    expect(deps.createCatalogDraftProduct).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an uncertain task failed when the remote product has no SKU", async () => {
+    const deps = dependencies();
+    const batch = await uncertainImport(deps);
+    deps.verifyDraftProduct = vi.fn(async (productId: string) => ({
+      productId, handle: "collana-orbis", title: "Collana Orbis", status: "DRAFT",
+      variants: [{ id: "variant", title: "Default", sku: null }],
+    })) as CatalogImportDependencies["verifyDraftProduct"];
+    const result = await reconcileNextAeternaCatalogItem(batch.batch.id, deps);
+    expect(result.totals.failed).toBe(1);
+    expect(result.items[0]?.message).toContain("RECONCILIATION_SKU_MISSING");
+  });
+
+  it("keeps an uncertain task failed when the remote SKU differs", async () => {
+    const deps = dependencies();
+    const batch = await uncertainImport(deps);
+    deps.verifyDraftProduct = vi.fn(async (productId: string) => ({
+      productId, handle: "collana-orbis", title: "Collana Orbis", status: "DRAFT",
+      variants: [{ id: "variant", title: "Default", sku: "OTHER-001" }],
+    })) as CatalogImportDependencies["verifyDraftProduct"];
+    const result = await reconcileNextAeternaCatalogItem(batch.batch.id, deps);
+    expect(result.totals.failed).toBe(1);
+    expect(result.items[0]?.message).toContain("RECONCILIATION_SKU_MISMATCH");
+  });
+
+  it("keeps an absent product uncertain so it can be checked again", async () => {
+    const deps = dependencies();
+    const batch = await uncertainImport(deps);
+    deps.verifyDraftProduct = vi.fn(async () => null) as CatalogImportDependencies["verifyDraftProduct"];
+    const result = await reconcileNextAeternaCatalogItem(batch.batch.id, deps);
+    expect(result.items[0]?.message).toContain("WRITE_OUTCOME_UNKNOWN:gid://shopify/Product/88");
+    expect(result.items[0]?.message).toContain("RECONCILIATION_PRODUCT_NOT_FOUND");
+  });
+
+  it("keeps a Shopify read error uncertain and serializes duplicate reconciliation requests", async () => {
+    const deps = dependencies();
+    const batch = await uncertainImport(deps);
+    deps.verifyDraftProduct = vi.fn(async () => { throw new Error("network"); }) as CatalogImportDependencies["verifyDraftProduct"];
+    const [first, second] = await Promise.all([
+      reconcileNextAeternaCatalogItem(batch.batch.id, deps),
+      reconcileNextAeternaCatalogItem(batch.batch.id, deps),
+    ]);
+    expect(`${first.items[0]?.message ?? ""}${second.items[0]?.message ?? ""}`).toContain("RECONCILIATION_READ_FAILED");
+    expect(deps.verifyDraftProduct).toHaveBeenCalledTimes(1);
   });
 });

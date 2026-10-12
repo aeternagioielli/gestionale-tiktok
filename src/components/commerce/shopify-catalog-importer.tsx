@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, LoaderCircle, Play, ShieldCheck, Sparkles } from "lucide-react";
+import { CheckCircle2, LoaderCircle, Play, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { AETERNA_PRODUCT_CATALOG } from "@/lib/aeterna-product-catalog";
 import { Button } from "@/components/ui/button";
@@ -50,7 +50,7 @@ function statusLabel(status: string): string {
 
 export function ShopifyCatalogImporter({ initialImport }: { initialImport: ImportView | null }) {
   const [catalogImport, setCatalogImport] = useState(initialImport);
-  const [busy, setBusy] = useState<"prepare" | "run" | null>(null);
+  const [busy, setBusy] = useState<"prepare" | "run" | "reconcile" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -106,6 +106,36 @@ export function ShopifyCatalogImporter({ initialImport }: { initialImport: Impor
     }
   }
 
+  async function reconcileCreatedProducts() {
+    if (!catalogImport) return;
+    const uncertain = catalogImport.items.filter((item) => item.message?.startsWith("ERROR: WRITE_OUTCOME_UNKNOWN:")).length;
+    if (!uncertain) return;
+    setBusy("reconcile");
+    setError(null);
+    setNotice(null);
+    try {
+      let data = catalogImport;
+      // One read-only query per persisted task. A page reload is safe because
+      // the service conditionally claims each task before reading Shopify.
+      for (let step = 0; step < uncertain; step += 1) {
+        data = await request(
+          "/api/agents/shopify-catalog-import/" + encodeURIComponent(data.batch.id) + "/reconcile",
+        );
+        setCatalogImport(data);
+      }
+      const remaining = data.items.filter((item) => item.message?.startsWith("ERROR: WRITE_OUTCOME_UNKNOWN:")).length;
+      setNotice(
+        remaining
+          ? "Alcune bozze richiedono ancora verifica manuale. Nessuna modifica Shopify e stata eseguita."
+          : "Le bozze trovate e verificate sono state riconciliate. Nessuna modifica Shopify e stata eseguita.",
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Impossibile verificare le bozze gia create.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const completed = catalogImport
     ? catalogImport.totals.draftCreated + catalogImport.totals.alreadyPresent + catalogImport.totals.requiresInformation + catalogImport.totals.failed
     : 0;
@@ -119,6 +149,7 @@ export function ShopifyCatalogImporter({ initialImport }: { initialImport: Impor
     message: null,
     updatedAt: "",
   }));
+  const uncertainCount = catalogImport?.items.filter((item) => item.message?.startsWith("ERROR: WRITE_OUTCOME_UNKNOWN:")).length ?? 0;
 
   return (
     <section className={styles.workspace} aria-labelledby="catalog-import-title">
@@ -161,6 +192,11 @@ export function ShopifyCatalogImporter({ initialImport }: { initialImport: Impor
           {catalogImport.batch.status !== "COMPLETED" && (
             <Button type="button" disabled={busy !== null} onClick={() => void authorizeAndRun()} icon={busy === "run" ? <LoaderCircle className="spin" size={15} /> : <Play size={15} />}>
               {busy === "run" ? "Alessandro sta elaborando..." : "Autorizza e avvia importazione"}
+            </Button>
+          )}
+          {uncertainCount > 0 && (
+            <Button type="button" disabled={busy !== null} onClick={() => void reconcileCreatedProducts()} icon={busy === "reconcile" ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />}>
+              {busy === "reconcile" ? "Verifica in corso..." : "Verifica prodotti gia creati"}
             </Button>
           )}
         </div>

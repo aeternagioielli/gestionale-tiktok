@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AuditAction } from "@/generated/prisma/enums";
 import {
   ShopifyAdapter,
+  ShopifyCatalogVariantSetupError,
   ShopifyDuplicateProductError,
   ShopifyDuplicateSkuError,
 } from "@/integrations/shopify/shopify.adapter";
@@ -12,6 +13,7 @@ import {
   approveAndClaimAgentTask,
   claimQueuedAgentTask,
   createAgentTask,
+  retryFailedAgentTask,
   transitionAgentTask,
   type AgentTaskView,
 } from "@/server/services/agent-task-service";
@@ -31,7 +33,8 @@ type TaskCreator = typeof createAgentTask;
 type TaskTransitioner = typeof transitionAgentTask;
 type TaskClaimer = typeof claimQueuedAgentTask;
 type ApprovalClaimer = typeof approveAndClaimAgentTask;
-type DraftProductCreator = Pick<ShopifyAdapter, "createDraftProduct">["createDraftProduct"];
+type CatalogDraftProductCreator = Pick<ShopifyAdapter, "createCatalogDraftProduct">["createCatalogDraftProduct"];
+type DraftProductVerifier = Pick<ShopifyAdapter, "verifyDraftProduct">["verifyDraftProduct"];
 
 export type CatalogImportItemView = {
   taskId: string;
@@ -83,7 +86,9 @@ export type CatalogImportDependencies = {
     event: "AUTHORIZED" | "STEP_COMPLETED";
     metadata?: Record<string, unknown>;
   }) => Promise<void>;
-  createDraftProduct: DraftProductCreator;
+  createCatalogDraftProduct: CatalogDraftProductCreator;
+  verifyDraftProduct: DraftProductVerifier;
+  retryFailedTask: typeof retryFailedAgentTask;
   isDatabaseConfigured: () => boolean;
 };
 
@@ -162,7 +167,9 @@ function defaultDependencies(): CatalogImportDependencies {
     getTask: defaultGetTask,
     listChildren: defaultListChildren,
     writeAudit: defaultWriteAudit,
-    createDraftProduct: adapter.createDraftProduct.bind(adapter),
+    createCatalogDraftProduct: adapter.createCatalogDraftProduct.bind(adapter),
+    verifyDraftProduct: adapter.verifyDraftProduct.bind(adapter),
+    retryFailedTask: retryFailedAgentTask,
     isDatabaseConfigured,
   };
 }
@@ -197,6 +204,15 @@ function catalogItemToDraft(item: CatalogItem): ShopifyDraftProduct {
 function hasPersistedShopifyProduct(task: AgentTaskView): string | null {
   const match = task.result?.match(/^SHOPIFY_PRODUCT_ID:([^;\s]+)/);
   return match?.[1] ?? null;
+}
+
+function uncertainProductId(task: AgentTaskView): string | null {
+  const match = task.result?.match(/^ERROR: WRITE_OUTCOME_UNKNOWN:([^;\s]+)/);
+  return match?.[1] ?? null;
+}
+
+function expectedHandle(item: CatalogItem): string {
+  return catalogItemToDraft(item).handle;
 }
 
 function itemFromTask(task: AgentTaskView): CatalogItem | null {
@@ -346,6 +362,91 @@ export async function authorizeAeternaCatalogImport(
 }
 
 /**
+ * Reconciles at most one previous uncertain write with a read-only Shopify query.
+ * It never creates, updates, publishes, or deletes a product or variant.
+ */
+export async function reconcileNextAeternaCatalogItem(
+  batchId: string,
+  dependencies: CatalogImportDependencies = defaultDependencies(),
+): Promise<CatalogImportView> {
+  if (!dependencies.isDatabaseConfigured()) {
+    throw new ShopifyCatalogImportError("Database non configurato.", "DATABASE_NOT_CONFIGURED");
+  }
+  const importView = await load(batchId, dependencies);
+  const candidates = await dependencies.listChildren(importView.batch.id);
+  const candidate = candidates.find((task) => task.status === "FAILED" && uncertainProductId(task));
+  if (!candidate) return importView;
+
+  // A conditional FAILED -> QUEUED transition prevents two browser requests from
+  // verifying the same product at the same time.
+  const reopened = await dependencies.retryFailedTask({ taskId: candidate.id, actor: "ALESSANDRO" });
+  if (!reopened) return load(batchId, dependencies);
+  const claimed = await dependencies.claimTask({ taskId: reopened.id, actor: "ALESSANDRO" });
+  if (!claimed) return load(batchId, dependencies);
+  const item = itemFromTask(claimed);
+  const productId = uncertainProductId(candidate);
+  if (!item || !productId) {
+    await dependencies.transitionTask({
+      taskId: claimed.id,
+      status: "FAILED",
+      actor: "ALESSANDRO",
+      result: "ERROR: RECONCILIATION_DATA_INVALID; impossibile verificare automaticamente questa bozza.",
+    });
+    return load(batchId, dependencies);
+  }
+
+  try {
+    const remote = await dependencies.verifyDraftProduct(productId);
+    let failure: string | null = null;
+    if (!remote) {
+      failure = "RECONCILIATION_PRODUCT_NOT_FOUND";
+    } else if (remote.status !== "DRAFT") {
+      failure = "RECONCILIATION_STATUS_MISMATCH";
+    } else if (remote.title !== item.name || remote.handle !== expectedHandle(item)) {
+      failure = "RECONCILIATION_IDENTITY_MISMATCH";
+    } else if (!remote.variants.some((variant) => variant.sku === item.sku)) {
+      failure = remote.variants.some((variant) => variant.sku) ? "RECONCILIATION_SKU_MISMATCH" : "RECONCILIATION_SKU_MISSING";
+    }
+    if (failure) {
+      const preserveUncertainState = failure === "RECONCILIATION_PRODUCT_NOT_FOUND";
+      await dependencies.transitionTask({
+        taskId: claimed.id,
+        status: "FAILED",
+        actor: "ALESSANDRO",
+        result: preserveUncertainState
+          ? `ERROR: WRITE_OUTCOME_UNKNOWN:${productId}; ${failure}. Nessuna modifica Shopify eseguita.`
+          : `ERROR: ${failure}:${productId}; verifica manuale richiesta. Nessuna modifica Shopify eseguita.`,
+      });
+      await dependencies.writeAudit({
+        taskId: claimed.id,
+        event: "STEP_COMPLETED",
+        metadata: { sku: item.sku, outcome: failure, productId },
+      }).catch(() => undefined);
+    } else {
+      await dependencies.transitionTask({
+        taskId: claimed.id,
+        status: "COMPLETED",
+        actor: "ALESSANDRO",
+        result: `DRAFT_CREATED:${productId}; PRICE_UNDEFINED: bozza Shopify verificata in sola lettura.`,
+      });
+      await dependencies.writeAudit({
+        taskId: claimed.id,
+        event: "STEP_COMPLETED",
+        metadata: { sku: item.sku, outcome: "RECONCILED_DRAFT", productId, priceState: "UNDEFINED" },
+      }).catch(() => undefined);
+    }
+  } catch {
+    await dependencies.transitionTask({
+      taskId: claimed.id,
+      status: "FAILED",
+      actor: "ALESSANDRO",
+      result: `ERROR: WRITE_OUTCOME_UNKNOWN:${productId}; RECONCILIATION_READ_FAILED. Stato conservato per una verifica successiva.`,
+    });
+  }
+  return load(batchId, dependencies);
+}
+
+/**
  * Processes at most one catalog item. This keeps each request short enough for
  * Render Free and leaves the exact next state in PostgreSQL before returning.
  */
@@ -407,7 +508,7 @@ export async function processNextAeternaCatalogItem(
     return load(batchId, dependencies);
   }
   try {
-    const product = await dependencies.createDraftProduct(catalogItemToDraft(item), async (created) => {
+    const product = await dependencies.createCatalogDraftProduct(catalogItemToDraft(item), async (created) => {
       // Persist before the variant mutation. This makes an interrupted request
       // observable and prevents a blind duplicate write on the next step.
       await dependencies.transitionTask({
@@ -446,12 +547,13 @@ export async function processNextAeternaCatalogItem(
       }).catch(() => undefined);
     } else {
       const persistedProductId = hasPersistedShopifyProduct((await dependencies.getTask(claimed.id)) ?? claimed);
+      const stage = error instanceof ShopifyCatalogVariantSetupError ? "VARIANT_SKU_CONFIGURATION_FAILED" : "POST_CREATE_OPERATION_FAILED";
       await dependencies.transitionTask({
         taskId: claimed.id,
         status: "FAILED",
         actor: "ALESSANDRO",
         result: persistedProductId
-          ? `ERROR: WRITE_OUTCOME_UNKNOWN:${persistedProductId}; verifica la bozza Shopify prima di qualsiasi nuovo tentativo.`
+          ? `ERROR: WRITE_OUTCOME_UNKNOWN:${persistedProductId}; ${stage}. Verifica la bozza Shopify prima di qualsiasi nuovo tentativo.`
           : "ERROR: SHOPIFY_REQUEST_FAILED; nessun retry automatico e nessuna pubblicazione eseguita.",
       });
       await dependencies.writeAudit({

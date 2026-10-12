@@ -88,6 +88,15 @@ export type ShopifyDraftProductResult = {
   variantIds: string[];
 };
 
+/** Minimal read-only proof used to reconcile an interrupted catalog import. */
+export type ShopifyDraftProductVerification = {
+  productId: string;
+  handle: string | null;
+  title: string;
+  status: string;
+  variants: Array<{ id: string; sku: string | null; title: string | null }>;
+};
+
 export type ShopifyOrderItem = {
   externalId: string;
   productExternalId: string | null;

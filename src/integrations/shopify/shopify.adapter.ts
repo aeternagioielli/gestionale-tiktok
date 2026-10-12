@@ -5,6 +5,7 @@ import type {
   ShopifyCatalogProduct,
   ShopifyDraftProduct,
   ShopifyDraftProductResult,
+  ShopifyDraftProductVerification,
   ShopifyOrder,
   ShopifyOrderItem,
   ShopifyProduct,
@@ -93,11 +94,32 @@ type ProductCreateMutation = {
     userErrors: Array<{ field?: string[] | null; message: string }>;
   };
 };
+type CatalogProductCreateMutation = {
+  productCreate: {
+    product: { id: string; handle: string | null; variants: { nodes: Array<{ id: string }> } } | null;
+    userErrors: Array<{ field?: string[] | null; message: string }>;
+  };
+};
+type ProductVariantsBulkUpdateMutation = {
+  productVariantsBulkUpdate: {
+    productVariants: Array<{ id: string; sku: string | null }>;
+    userErrors: Array<{ field?: string[] | null; message: string }>;
+  };
+};
 type ProductVariantsBulkCreateMutation = {
   productVariantsBulkCreate: {
     productVariants: Array<{ id: string; price: string | null }>;
     userErrors: Array<{ field?: string[] | null; message: string }>;
   };
+};
+type ProductVerificationQuery = {
+  product: {
+    id: string;
+    handle: string | null;
+    title: string;
+    status: string;
+    variants: { nodes: Array<{ id: string; sku: string | null; title: string | null }> };
+  } | null;
 };
 
 const ORDERS_QUERY = `
@@ -210,10 +232,37 @@ const PRODUCT_VARIANT_BY_SKU_QUERY = `
   }
 `;
 
+const PRODUCT_VERIFICATION_QUERY = `
+  query VerifyDraftProduct($id: ID!) {
+    product(id: $id) {
+      id handle title status
+      variants(first: 100) { nodes { id title sku } }
+    }
+  }
+`;
+
 const PRODUCT_CREATE_MUTATION = `
   mutation CreateDraftProduct($product: ProductCreateInput!, $media: [CreateMediaInput!]) {
     productCreate(product: $product, media: $media) {
       product { id handle }
+      userErrors { field message }
+    }
+  }
+`;
+
+const CATALOG_PRODUCT_CREATE_MUTATION = `
+  mutation CreateCatalogDraft($product: ProductCreateInput!) {
+    productCreate(product: $product) {
+      product { id handle variants(first: 1) { nodes { id } } }
+      userErrors { field message }
+    }
+  }
+`;
+
+const PRODUCT_VARIANTS_BULK_UPDATE_MUTATION = `
+  mutation SetCatalogDraftSku($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+      productVariants { id sku }
       userErrors { field message }
     }
   }
@@ -254,6 +303,14 @@ export class ShopifyWriteAccessError extends Error {
   constructor(message = "L'app Shopify non dispone dello scope write_products.") {
     super(message);
     this.name = "ShopifyWriteAccessError";
+  }
+}
+
+/** A safe, non-sensitive marker for a failure after catalog product creation. */
+export class ShopifyCatalogVariantSetupError extends Error {
+  constructor() {
+    super("Shopify non ha confermato la variante catalogo.");
+    this.name = "ShopifyCatalogVariantSetupError";
   }
 }
 
@@ -495,6 +552,73 @@ export class ShopifyAdapter implements ExternalIntegrationAdapter {
   async hasWriteProductsAccess(): Promise<boolean> {
     const response = await this.graphql<AccessScopesQuery>(ACCESS_SCOPES_QUERY, {});
     return Boolean(response.currentAppInstallation?.accessScopes.some((scope) => scope.handle === "write_products"));
+  }
+
+  /** Read-only verification for a product ID persisted before a write completed. */
+  async verifyDraftProduct(productId: string): Promise<ShopifyDraftProductVerification | null> {
+    const response = await this.graphql<ProductVerificationQuery>(PRODUCT_VERIFICATION_QUERY, { id: productId });
+    if (!response.product) return null;
+    return {
+      productId: response.product.id,
+      handle: response.product.handle,
+      title: response.product.title,
+      status: response.product.status,
+      variants: response.product.variants.nodes,
+    };
+  }
+
+  /**
+   * Creates one DRAFT with Shopify's standalone default variant, then assigns
+   * the verified SKU to that existing variant. This avoids removing and
+   * recreating the default variant for the catalog's one-variant products.
+   */
+  async createCatalogDraftProduct(
+    input: ShopifyDraftProduct,
+    onProductCreated?: (product: Pick<ShopifyDraftProductResult, "productId" | "handle">) => Promise<void>,
+  ): Promise<ShopifyDraftProductResult> {
+    const variant = input.variants[0];
+    if (!variant?.sku || input.variants.length !== 1) {
+      throw new ShopifyApiError("Il catalogo richiede una sola variante con SKU verificato.", 422);
+    }
+    if (!(await this.hasWriteProductsAccess())) throw new ShopifyWriteAccessError();
+    const duplicate = await this.graphql<ProductHandleQuery>(PRODUCT_BY_HANDLE_QUERY, { query: `handle:${input.handle}` });
+    if (duplicate.products.nodes.length > 0) throw new ShopifyDuplicateProductError(duplicate.products.nodes[0]?.id);
+    const existingSku = await this.graphql<ProductVariantSkuQuery>(PRODUCT_VARIANT_BY_SKU_QUERY, { query: `sku:${variant.sku}` });
+    if (existingSku.productVariants.nodes.length > 0) {
+      throw new ShopifyDuplicateSkuError(existingSku.productVariants.nodes[0]?.product?.id ?? existingSku.productVariants.nodes[0]?.id);
+    }
+    const product = await this.graphql<CatalogProductCreateMutation>(CATALOG_PRODUCT_CREATE_MUTATION, {
+      product: {
+        title: input.title,
+        handle: input.handle,
+        descriptionHtml: input.descriptionHtml,
+        ...(input.productType ? { productType: input.productType } : {}),
+        ...(input.seoTitle || input.seoDescription
+          ? { seo: { ...(input.seoTitle ? { title: input.seoTitle } : {}), ...(input.seoDescription ? { description: input.seoDescription } : {}) } }
+          : {}),
+        status: "DRAFT",
+      },
+    });
+    const created = product.productCreate.product;
+    if (product.productCreate.userErrors.length || !created?.id || !created.handle || !created.variants.nodes[0]?.id) {
+      throw new ShopifyApiError(product.productCreate.userErrors.map((error) => error.message).join("; ") || "Shopify non ha creato la bozza catalogo.", 422);
+    }
+    await onProductCreated?.({ productId: created.id, handle: created.handle });
+    let updated: ProductVariantsBulkUpdateMutation;
+    try {
+      updated = await this.graphql<ProductVariantsBulkUpdateMutation>(PRODUCT_VARIANTS_BULK_UPDATE_MUTATION, {
+        productId: created.id,
+        variants: [{ id: created.variants.nodes[0].id, sku: variant.sku }],
+      });
+      if (updated.productVariantsBulkUpdate.userErrors.length || updated.productVariantsBulkUpdate.productVariants[0]?.sku !== variant.sku) {
+        throw new ShopifyCatalogVariantSetupError();
+      }
+    } catch {
+      // The product ID was already persisted. Do not expose provider details and
+      // leave recovery to the read-only reconciliation path.
+      throw new ShopifyCatalogVariantSetupError();
+    }
+    return { productId: created.id, handle: created.handle, variantIds: updated.productVariantsBulkUpdate.productVariants.map((item) => item.id) };
   }
 
   /**
